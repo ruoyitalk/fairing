@@ -1,0 +1,7 @@
+feedparser>=6.0
+firecrawl-py>=4.0
+google-genai>=1.0      # Gemini API (replaces deprecated google-generativeai)
+python-dotenv>=1.0
+pyyaml>=6.0
+streamlit>=1.40
+colorama>=0.4

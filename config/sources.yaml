@@ -1,0 +1,109 @@
+# Public RSS sources. Safe to commit.
+# Private feeds go in config/sources.local.yaml (gitignored).
+#
+# lookback_hours: how far back each run looks. Default: 24.
+# Assumes daily runs. seen_urls.json dedup prevents re-appearing articles,
+# so 24h is correct for all sources except arXiv (48h because arXiv does not
+# publish on weekends — Monday runs must reach back to Friday's announcements).
+#
+# Fields:
+#   name              display name
+#   url               RSS/Atom feed URL
+#   category          used for grouping in output
+#   lookback_hours    (default 24)
+#   firecrawl_fulltext  true = fetch full article body via Firecrawl API
+
+rss:
+  # ── Databases & Data Platform ────────────────────────────────────────────────
+  - name: ClickHouse Blog
+    url: https://clickhouse.com/rss.xml
+    category: Database
+    firecrawl_fulltext: true
+
+  - name: Databricks Blog
+    url: http://databricks.com/feed
+    category: Data Platform
+    firecrawl_fulltext: true
+
+  # ── AI / ML ──────────────────────────────────────────────────────────────────
+  - name: Qdrant Blog
+    url: https://qdrant.tech/articles/index.xml
+    category: AI / Vector DB
+
+  - name: NVIDIA Developer Blog
+    url: https://developer.nvidia.com/blog/feed/
+    category: AI / Infrastructure
+
+  - name: Lilian Weng
+    url: https://lilianweng.github.io/index.xml
+    category: AI / ML Research
+
+  - name: Eugene Yan
+    url: https://eugeneyan.com/rss/
+    category: AI / ML
+
+  - name: Anthropic Engineering
+    url: https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_engineering.xml
+    category: AI / Engineering
+
+  - name: ByteByteGo
+    url: https://blog.bytebytego.com/feed
+    category: Architecture
+
+  # ── Research ─────────────────────────────────────────────────────────────────
+  - name: arXiv cs.DB/cs.AR/cs.OS
+    url: https://rss.arxiv.org/atom/cs.DB+cs.AR+cs.OS
+    category: Research
+    lookback_hours: 48
+
+  # ── GitHub Releases ──────────────────────────────────────────────────────────
+  - name: Apache Calcite Releases
+    url: https://github.com/apache/calcite/releases.atom
+    category: Release
+
+  - name: Trino Releases
+    url: https://github.com/trinodb/trino/releases.atom
+    category: Release
+
+  - name: ClickHouse Releases
+    url: https://github.com/ClickHouse/ClickHouse/releases.atom
+    category: Release
+
+  # ── Community ─────────────────────────────────────────────────────────────────
+  - name: HackerNews: query optimizer
+    url: https://hnrss.org/newest?q=database+query+optimizer
+    category: Community
+
+  - name: HackerNews: distributed systems
+    url: https://hnrss.org/newest?q=distributed+systems
+    category: Community
+
+  - name: r/dataengineering
+    url: https://www.reddit.com/r/dataengineering/.rss
+    category: Community
+
+  # ── Video ─────────────────────────────────────────────────────────────────────
+  - name: CMU Database Group
+    url: https://www.youtube.com/feeds/videos.xml?channel_id=UCHnBsf2rH-K7pn09rb3qvkA
+    category: Research / Video
+
+  # ── Newsletters ───────────────────────────────────────────────────────────────
+  - name: FinOps Foundation
+    url: https://www.finops.org/feed/
+    category: Cloud / FinOps
+
+  - name: benn.substack
+    url: https://benn.substack.com/feed/
+    category: Data / Strategy
+
+  - name: Software Architecture Weekly
+    url: https://softwarearchitectureweekly.substack.com/feed
+    category: Architecture
+
+  - name: The Pragmatic Engineer
+    url: https://newsletter.pragmaticengineer.com/feed
+    category: Engineering
+
+  - name: Curious Engineer
+    url: https://vivekbansal.substack.com/feed
+    category: Engineering

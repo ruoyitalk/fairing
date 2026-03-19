@@ -1,0 +1,29 @@
+# Private config
+.env
+config/sources.local.yaml
+
+# Output
+output/
+digests/
+
+# Runtime state (dedup)
+.digest_hash
+.seen_urls.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+
+# Temp / dev-only files
+SOURCES_TMP.md
+daily_digest.ipynb
