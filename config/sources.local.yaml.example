@@ -1,0 +1,12 @@
+# Copy this file to sources.local.yaml and fill in your private feeds.
+# This file IS committed as a template. sources.local.yaml is gitignored.
+
+rss:
+  # Kill the Newsletter: converts email newsletters to RSS.
+  # Sign up at https://kill-the-newsletter.com, use the generated address to subscribe,
+  # then add the feed URL here.
+  - name: McKinsey Newsletter
+    url: https://kill-the-newsletter.com/feeds/<your-id>.xml
+    category: Strategy / AI
+
+  # Add any other private or personal RSS feeds below.

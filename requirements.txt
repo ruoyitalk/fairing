@@ -1,0 +1,14 @@
+colorama>=0.4
+feedparser>=6.0
+firecrawl-py>=4.0
+google-genai>=1.0
+joblib>=1.3
+python-dotenv>=1.0
+pyyaml>=6.0
+rich>=13.0
+scikit-learn>=1.3
+sentence-transformers>=3.0
+
+# Optional translation backends (install the one you use):
+# openai>=1.0          for TRANSLATOR=openai or ollama
+# anthropic>=0.25      for TRANSLATOR=claude

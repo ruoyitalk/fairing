@@ -1,0 +1,49 @@
+# Private config
+.env
+config/sources.local.yaml
+
+# Output
+output/
+digests/
+
+# Training data — lives in DATA_DIR (local or synced), never in git
+data/feedback.jsonl
+
+# Runtime state — lives in DATA_DIR
+.seen_urls.json
+seen_urls.json
+.rate_pending.json
+rate_pending.json
+.digest_hash
+digest_hash
+.last_run_articles.json
+last_run_articles.json
+
+# ML artifacts — lives in DATA_DIR (rebuildable from feedback)
+.scoring_store.jsonl
+scoring_store.jsonl
+.personal_model.pkl
+personal_model.pkl
+.personal_scaler.pkl
+personal_scaler.pkl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Claude Code internal
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+
+# Temp / dev-only files
+SOURCES_TMP.md
+daily_digest.ipynb
