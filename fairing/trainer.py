@@ -46,7 +46,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-from .paths import feedback_file as _feedback_file, model_file as _model_file, scaler_file as _scaler_file
+from .paths import (feedback_file as _feedback_file, model_file as _model_file,
+                    scaler_file as _scaler_file, training_log_file as _log_file)
 
 def _ff() -> Path: return _feedback_file()
 def _mf() -> Path: return _model_file()
@@ -201,12 +202,29 @@ def _train(valid: list[tuple]) -> TrainResult:
             cv_mean, cv_std, ACCURACY_THRESHOLD,
         )
 
-    return TrainResult(
+    result = TrainResult(
         cv_accuracy=cv_mean, cv_std=cv_std,
         n_samples=n, n_pos=n_pos, n_neg=n_neg,
         n_folds=n_folds, deployed=deployed,
         C_selected=C_selected,
     )
+
+    # Append one record to the training log for history tracking.
+    from fairing.state import today_beijing
+    log_entry = {
+        "date":        today_beijing(),
+        "n_samples":   n,
+        "n_pos":       n_pos,
+        "n_neg":       n_neg,
+        "cv_accuracy": round(cv_mean, 4),
+        "cv_std":      round(cv_std, 4),
+        "C":           C_selected,
+        "deployed":    deployed,
+    }
+    with _log_file().open("a", encoding="utf-8") as _lf:
+        _lf.write(json.dumps(log_entry) + "\n")
+
+    return result
 
 
 # ── inference ─────────────────────────────────────────────────────────────────

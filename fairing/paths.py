@@ -99,3 +99,6 @@ def payload_queue_file() -> Path:
 
 def feed_errors_file() -> Path:
     return data_path("feed_errors.json")
+
+def training_log_file() -> Path:
+    return data_path("training_log.jsonl")

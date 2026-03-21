@@ -80,6 +80,8 @@ _SHORTCUTS: dict[str, str] = {
     r"\pd":   "payload",
     r"\ps":   "psearch",
     r"\sd":   "send",
+    r"\fb":   "fb",
+    r"\slr":  "suspect",
     r"\li":   "license",
     r"\q":    "quit",
 }
@@ -243,6 +245,18 @@ def _show_sources() -> None:
     from datetime import timedelta
     from fairing.embedder import load_store
     from fairing.state import normalize_url as _norm
+    from fairing.trainer import load_feedback
+
+    # ── Build per-source label quality (positive ratio) ───────────────────────
+    src_pos:     dict[str, int] = {}
+    src_labeled: dict[str, int] = {}
+    for f in load_feedback():
+        src = f.get("source", "")
+        if not src:
+            continue
+        src_labeled[src] = src_labeled.get(src, 0) + 1
+        if f["label"] == 1:
+            src_pos[src] = src_pos.get(src, 0) + 1
 
     # ── Build per-source 7-day counts ─────────────────────────────────────────
     src_7d: dict[str, int] = {}
@@ -309,6 +323,7 @@ def _show_sources() -> None:
         t.add_column("名称",  style="cyan", min_width=22)
         t.add_column("分类",  min_width=12)
         t.add_column("7天",   justify="right", width=5, style="cyan")
+        t.add_column("质量",  justify="right", width=8)
         t.add_column("上次",  justify="right", width=7)
         t.add_column("状态",  width=5)
         for i, s in enumerate(rss, 1):
@@ -316,6 +331,14 @@ def _show_sources() -> None:
             cnt     = str(src_7d.get(name, 0)) if src_7d.get(name) else "[dim]0[/dim]"
             enabled = name not in disabled_set and s.get("enabled", True)
             status  = "[green]开[/green]" if enabled else "[red]关[/red]"
+            total_lb = src_labeled.get(name, 0)
+            pos_lb   = src_pos.get(name, 0)
+            if total_lb > 0:
+                ratio     = pos_lb / total_lb
+                color     = "green" if ratio >= 0.5 else "yellow" if ratio >= 0.25 else "red"
+                qual_cell = f"[{color}]+{pos_lb}/{total_lb}[/{color}]"
+            else:
+                qual_cell = "[dim]—[/dim]"
             if name in src_last_h:
                 h = src_last_h[name]
                 if h < 1:
@@ -326,7 +349,7 @@ def _show_sources() -> None:
                     last_str = f"[yellow]{int(h // 24)}d[/yellow]"
             else:
                 last_str = "[dim]—[/dim]"
-            t.add_row(str(i), name, s.get("category", ""), cnt, last_str, status)
+            t.add_row(str(i), name, s.get("category", ""), cnt, qual_cell, last_str, status)
         console.print(Panel(t, title=f"[bold]{yaml_path.name}[/bold] [{color}]({label})[/{color}]",
                             border_style=color))
 
@@ -515,6 +538,30 @@ def _show_model_status() -> None:
             sig_t.add_row("[red]−[/red]",   "  ".join(f"[red]{w}[/red]"   for w in top_neg))
         console.print(Panel(sig_t, title="[bold]语义信号[/bold]", border_style="dim"))
 
+    # Training history
+    from fairing.paths import training_log_file
+    log_path = training_log_file()
+    if log_path.exists():
+        rows = [json.loads(l) for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        rows = rows[-10:]   # most recent 10
+        if rows:
+            h = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
+            h.add_column("日期",   width=12)
+            h.add_column("样本",   justify="right", width=6)
+            h.add_column("+/-",    width=10)
+            h.add_column("准确率", justify="right", width=14)
+            h.add_column("C",      justify="right", width=8)
+            h.add_column("部署",   width=5)
+            for r in reversed(rows):
+                deploy_cell = "[green]✓[/green]" if r["deployed"] else "[red]✗[/red]"
+                acc_cell    = (f"[green]{r['cv_accuracy']:.2%}[/green]"
+                               if r["deployed"] else f"[yellow]{r['cv_accuracy']:.2%}[/yellow]")
+                acc_cell   += f" [dim]±{r['cv_std']:.2%}[/dim]"
+                h.add_row(r["date"], str(r["n_samples"]),
+                          f"[green]+{r['n_pos']}[/green]/[red]-{r['n_neg']}[/red]",
+                          acc_cell, f"{r['C']:.3f}", deploy_cell)
+            console.print(Panel(h, title="[bold]训练历史（最近 10 次）[/bold]", border_style="dim"))
+
 
 def MAX(a, b):  # tiny helper to avoid importing max ambiguity
     return a if a > b else b
@@ -554,11 +601,13 @@ def _prompt_choice(a: dict, idx: int, total: int,
                    current_label: int | None = None,
                    can_go_back: bool = False,
                    daily_done: int = 0,
-                   daily_total: int = 0) -> str:
+                   daily_total: int = 0,
+                   nearby: tuple[list[str], list[str]] | None = None) -> str:
     """Display one article card, prompt for input, and return the choice.
 
     Valid returns: '+' '-' 'n' 's' 'o' (open URL) 'p' (previous, only if can_go_back).
     daily_done / daily_total: overall today's task progress (mandatory mode only).
+    nearby: (pos_titles, neg_titles) from _nearest_labels(); shown as score explanation.
     """
     _clear()
 
@@ -605,7 +654,18 @@ def _prompt_choice(a: dict, idx: int, total: int,
     preview   = text[:700]
     if len(text) > 700:
         preview += f"\n[dim]...（共 {len(text)} 字）[/dim]"
-    body = f"{meta_line}\n{url_line}\n\n{preview}" if url_line else f"{meta_line}\n\n{preview}"
+    explanation = ""
+    if nearby:
+        pos_nb, neg_nb = nearby
+        if pos_nb:
+            explanation += "\n[dim]▶ 相似有价值：[/dim]" + "  [dim]·[/dim]  ".join(
+                f"[dim green]{t}[/dim green]" for t in pos_nb)
+        if neg_nb:
+            explanation += "\n[dim]▷ 相似不感兴趣：[/dim]" + "  [dim]·[/dim]  ".join(
+                f"[dim red]{t}[/dim red]" for t in neg_nb)
+
+    body = (f"{meta_line}\n{url_line}\n\n{preview}{explanation}"
+            if url_line else f"{meta_line}\n\n{preview}{explanation}")
 
     panel_title = f"[dim][{idx}/{total}]"
     if mode_tag:
@@ -690,6 +750,45 @@ def _show_train_result(result, pos_count: int, neg_count: int, total_hist: int) 
         ))
 
 
+def _nearest_labels(url: str, store: dict, feedback: list[dict],
+                    n: int = 2) -> tuple[list[str], list[str]]:
+    """Return titles of the n nearest positive and n nearest negative labeled articles.
+
+    Uses cosine similarity between the article's embedding and all labeled articles
+    whose embeddings are cached in the scoring store. Returns empty lists when the
+    model is not deployed or the article has no cached embedding.
+    """
+    if url not in store or "embedding" not in store[url]:
+        return [], []
+    import numpy as np
+    emb  = np.array(store[url]["embedding"], dtype=float)
+    norm = np.linalg.norm(emb)
+    if norm < 1e-9:
+        return [], []
+    emb_unit = emb / norm
+
+    pos_sims: list[tuple[float, str]] = []
+    neg_sims: list[tuple[float, str]] = []
+    for f in feedback:
+        furl = f.get("url", "")
+        if furl == url or furl not in store or "embedding" not in store[furl]:
+            continue
+        other      = np.array(store[furl]["embedding"], dtype=float)
+        other_norm = np.linalg.norm(other)
+        if other_norm < 1e-9:
+            continue
+        sim   = float(np.dot(emb_unit, other / other_norm))
+        title = f.get("title", "")
+        if f["label"] == 1:
+            pos_sims.append((sim, title))
+        elif f["label"] == -1:
+            neg_sims.append((sim, title))
+
+    top_pos = [t for _, t in sorted(pos_sims, reverse=True)[:n]]
+    top_neg = [t for _, t in sorted(neg_sims, reverse=True)[:n]]
+    return top_pos, top_neg
+
+
 def _run_rate(pending: dict) -> None:
     """Mandatory rate mode: label today's sampled articles.
 
@@ -728,12 +827,14 @@ def _run_rate(pending: dict) -> None:
     while cursor < len(sample):
         a          = sample[cursor]
         daily_done = done_at_start + cursor   # cumulative progress this day
+        nb     = _nearest_labels(a.get("url", ""), store, feedback) if "score" in a else None
         choice = _prompt_choice(a, cursor + 1, len(sample),
                                 session_pos, session_neg,
                                 pos_count, neg_count, total_hist,
                                 can_go_back=cursor > 0,
                                 daily_done=daily_done,
-                                daily_total=daily_total)
+                                daily_total=daily_total,
+                                nearby=nb)
         if choice == "s":
             quit_early = True
             break
@@ -818,10 +919,12 @@ def _run_extra_rate(extra_pool: list[dict]) -> None:
     cursor = 0
     while cursor < total:
         a      = pool[cursor]
+        nb     = _nearest_labels(a.get("url", ""), store, feedback) if "score" in a else None
         choice = _prompt_choice(a, cursor + 1, total,
                                 session_pos, session_neg,
                                 pos_count, neg_count, total_hist,
-                                mode_tag="额外", can_go_back=cursor > 0)
+                                mode_tag="额外", can_go_back=cursor > 0,
+                                nearby=nb)
         if choice == "s":
             break
 
@@ -1060,11 +1163,13 @@ def _run_ext_rate() -> None:
 
     while cursor < len(pool):
         a      = pool[cursor]
+        nb     = _nearest_labels(a.get("url", ""), store, feedback) if "score" in a else None
         choice = _prompt_choice(
             a, cursor + 1, len(pool),
             session_pos, session_neg,
             pos_count, neg_count, total_hist,
             can_go_back=(cursor > 0),
+            nearby=nb,
         )
         if choice == "s":
             quit_early = True
@@ -1189,7 +1294,8 @@ def _show_shortcuts() -> None:
         (r"\rate", "rate",         "[--ext]",                   "必需打标（未完成阻塞 \\r）；--ext 扩展全量未标文章新→旧"),
         (r"\lb",   "labels",       "[英文关键词]",              "标注记录管理：搜索 · 翻页 · 修改"),
         ("",       "",             "",                          ""),
-        (r"\ms",   "model_status", "",                          "分类器状态 · 训练进度 · 语义信号词"),
+        (r"\ms",   "model_status", "",                          "分类器状态 · 训练历史 · 语义信号词"),
+        (r"\slr",  "suspect",      "",                          "审查可疑标注（模型与判断分歧 >60%）"),
         (r"\re",   "resend",       "",                          "重建今日文章列表并强制重发邮件"),
         (r"\dl",   "remd",         "[--no-md] [--no-notebook]", "重建今日文件（不发邮件，供从设备同步使用）"),
         ("",       "",             "",                          ""),
@@ -1203,6 +1309,7 @@ def _show_shortcuts() -> None:
         (r"\pd",   "payload",      "[clear]",                   "查看全文下载队列；clear 清空"),
         (r"\ps",   "psearch",      "<英文关键词>",              "搜索文章并加入下载队列"),
         (r"\sd",   "send",         "<id> [id2 ...]",            "按 article_id（16 位）加入下载队列"),
+        (r"\fb",   "fb",           "<article_id>",              "补充阅读后标注（+/- label 写回训练池）"),
         ("",       "",             "",                          ""),
         (r"\li",   "license",      "",                          "查看 MIT 许可证"),
         (r"\?  \h","shortcuts",    "",                          "显示本帮助"),
@@ -1787,6 +1894,183 @@ class Shell(cmd.Cmd):
                 console.print("  [dim]已跳过[/dim]")
                 continue
             _dispatch_to_payload(a, ask_label=True)
+
+    def do_fb(self, line: str) -> None:
+        """Add a post-read positive or negative label by article_id.
+
+  Usage:
+    fb <article_id>
+
+  Use after reading a full article via the payload consumer to feed a
+  high-quality label back into fairing's training pool."""
+        _clear()
+        aid = line.strip()
+        if not aid:
+            console.print(Panel(
+                "[yellow]用法: fb <article_id>[/yellow]\n"
+                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\ps[/cyan] 中显示[/dim]",
+                border_style="yellow",
+            ))
+            return
+        from fairing.export import find_by_id
+        a = find_by_id(aid)
+        if a is None:
+            console.print(Panel(f"[yellow]未找到 id={aid}[/yellow]", border_style="yellow"))
+            return
+
+        console.print(Panel(
+            f"  [bold cyan]{a['title']}[/bold cyan]\n"
+            f"  [dim]{a.get('source', '')}  {a.get('url', '')}[/dim]",
+            title="[bold]补充阅读后标注[/bold]", border_style="cyan",
+        ))
+        raw = input("  标注 [+] 有价值  [-] 不感兴趣  [n] 取消  > ").strip().lower()
+        if raw not in ("+", "-"):
+            console.print("  [dim]已取消[/dim]")
+            return
+
+        label = 1 if raw == "+" else -1
+        from fairing.trainer import load_feedback, save_feedback, maybe_auto_train
+        from fairing.embedder import load_store
+        feedback = load_feedback()
+        save_feedback({
+            "url":         a["url"],
+            "title":       a["title"],
+            "source":      a.get("source", ""),
+            "label":       label,
+            "label_index": len(feedback),
+            "date":        _today_beijing(),
+        })
+        label_str = "[green]有价值 +1[/green]" if label == 1 else "[red]不感兴趣 -1[/red]"
+        console.print(f"  ✓ 已标注为 {label_str}")
+        result = maybe_auto_train(load_store())
+        feedback_new = load_feedback()
+        pos = sum(1 for f in feedback_new if f["label"] ==  1)
+        neg = sum(1 for f in feedback_new if f["label"] == -1)
+        _show_train_result(result, pos, neg, len(feedback_new))
+
+    def do_suspect(self, _line: str) -> None:
+        """Review labels where the model strongly disagrees with your judgment.
+
+  Shows articles where model prediction conflicts with the saved label
+  (model score > 0.65 for a negative label, or < 0.35 for a positive label).
+  Sorted by disagreement magnitude. Allows re-labeling."""
+        _clear()
+        from fairing.trainer import load_model_and_scaler, load_feedback, save_feedback, maybe_auto_train
+        from fairing.embedder import load_store
+        import numpy as np
+
+        model, scaler = load_model_and_scaler()
+        if model is None:
+            console.print(Panel(
+                "[yellow]模型尚未部署，无法评估可疑标注[/yellow]\n"
+                "[dim]积累 80+ 标注后训练模型，再使用此功能[/dim]",
+                border_style="yellow",
+            ))
+            return
+
+        store    = load_store()
+        feedback = load_feedback()
+        classes  = model.classes_.tolist()
+        pos_idx  = classes.index(1) if 1 in classes else 1
+
+        suspects = []
+        for f in feedback:
+            url = f.get("url", "")
+            if url not in store or "embedding" not in store[url]:
+                continue
+            emb      = np.array([store[url]["embedding"]])
+            prob_pos = float(model.predict_proba(scaler.transform(emb))[0][pos_idx])
+            label    = f["label"]
+            disagreement = prob_pos if label == -1 else (1.0 - prob_pos)
+            if disagreement > 0.6:
+                suspects.append({**f, "_prob": prob_pos, "_dis": disagreement})
+
+        if not suspects:
+            console.print(Panel(
+                "[green]没有强烈分歧的标注[/green]\n[dim]模型与你的判断一致性良好[/dim]",
+                border_style="green",
+            ))
+            return
+
+        suspects.sort(key=lambda x: x["_dis"], reverse=True)
+        PAGE_SIZE   = 15
+        total_pages = max(1, (len(suspects) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page        = 0
+        changed     = 0
+
+        while True:
+            _clear()
+            start      = page * PAGE_SIZE
+            page_items = suspects[start:start + PAGE_SIZE]
+            t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
+            t.add_column("#",    style="dim",  width=4)
+            t.add_column("标题", style="cyan", min_width=40, no_wrap=False)
+            t.add_column("标注", width=8)
+            t.add_column("模型",  justify="right", width=8)
+            t.add_column("分歧",  justify="right", width=8)
+            for i, s in enumerate(page_items, 1):
+                label_cell = "[green]+1[/green]" if s["label"] == 1 else "[red]-1[/red]"
+                prob_cell  = f"{s['_prob']:.0%}"
+                dis_cell   = f"[yellow]{s['_dis']:.0%}[/yellow]"
+                t.add_row(str(i), s.get("title", ""), label_cell, prob_cell, dis_cell)
+            console.print(Panel(
+                t,
+                title=f"[bold]可疑标注  [{len(suspects)} 条]  第 {page+1}/{total_pages} 页[/bold]"
+                      + (f"  · 已修改 [green]{changed}[/green] 条" if changed else ""),
+                border_style="yellow",
+            ))
+            nav = []
+            if page < total_pages - 1: nav.append("[cyan]n[/cyan] 下一页")
+            if page > 0:               nav.append("[cyan]p[/cyan] 上一页")
+            nav.append("[cyan]<编号>[/cyan] 复审")
+            nav.append("[cyan]q[/cyan] 退出")
+            console.print("  " + "  · ".join(nav))
+
+            raw = input("  > ").strip().lower()
+            if raw in ("q", ""):
+                break
+            if raw == "n" and page < total_pages - 1:
+                page += 1; continue
+            if raw == "p" and page > 0:
+                page -= 1; continue
+            if raw.isdigit():
+                idx = int(raw) - 1
+                if 0 <= idx < len(page_items):
+                    entry  = page_items[idx]
+                    a_dict = dict(store.get(entry["url"], {}))
+                    a_dict.setdefault("url",   entry["url"])
+                    a_dict.setdefault("title", entry.get("title", ""))
+                    choice = _prompt_choice(
+                        a_dict, idx=1, total=1,
+                        session_pos=0, session_neg=0,
+                        pos_count=0, neg_count=0, total_hist=len(feedback),
+                        mode_tag="可疑复审", current_label=entry["label"],
+                        can_go_back=False,
+                    )
+                    if choice in ("+", "-"):
+                        new_label = 1 if choice == "+" else -1
+                        if new_label != entry["label"]:
+                            feedback = load_feedback()
+                            save_feedback({
+                                "url":         entry["url"],
+                                "title":       entry.get("title", ""),
+                                "source":      entry.get("source", ""),
+                                "label":       new_label,
+                                "label_index": len(feedback),
+                                "date":        _today_beijing(),
+                            })
+                            entry["label"] = new_label
+                            changed += 1
+            else:
+                console.print("  [yellow]请输入编号 · n/p 翻页 · q 退出[/yellow]")
+                input("  [回车继续]")
+
+        if changed:
+            result   = maybe_auto_train(load_store())
+            feedback = load_feedback()
+            pos = sum(1 for f in feedback if f["label"] ==  1)
+            neg = sum(1 for f in feedback if f["label"] == -1)
+            _show_train_result(result, pos, neg, len(feedback))
 
     def do_license(self, _line: str) -> None:
         """Show the MIT license."""
