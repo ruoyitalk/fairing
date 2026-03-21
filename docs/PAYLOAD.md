@@ -75,28 +75,57 @@ The file is a JSON array. fairing deduplicates by `article_id` before writing.
 
 ---
 
-## Three Ways to Add Articles
+## Four Ways to Add Articles
 
 ### 1. `d` key during `\rate` / `\rate --ext`
 
 During any labeling session, press `d` to send the current article to the queue. Optionally prompts to also label it positive. The card stays on screen; labeling continues uninterrupted.
 
-### 2. `\sd <id>` — Send by ID
+### 2. `\sd <id>` — Enqueue by ID
 
 ```
 \sd a1b2c3d4e5f6a7b8
 ```
 
-Looks up the article by `article_id` in the search pool and queues it after confirmation.
+(`\sd` → `enqueue`) Looks up the article by `article_id` in the search pool and queues it after confirmation.
 
-### 3. `\ps [keywords]` — Payload Search
+### 3. `\ps [keywords]` — Queue Search
 
 ```
 \ps                   # browse all articles (paginated)
 \ps query optimizer   # filter by title keywords
 ```
 
-Presents paginated results. The user selects entries by number across multiple pages, then confirms the batch addition.
+(`\ps` → `queue_search`) Presents paginated results. Select entries by number across pages, then confirm batch addition.
+
+### 4. `\im <file.csv>` — Batch Import
+
+```
+\im ~/Downloads/articles.csv
+```
+
+(`\im` → `import_csv`) Reads a CSV file and processes each row. Supports labeling, queuing, or both in a single operation.
+
+CSV format — two columns, no header required:
+
+```csv
+article_id,action
+5e07b775ab1f3af6,+q
+a1b2c3d4e5f6a7b8,-
+deadbeef00000001,q
+cafebabe12345678,s
+```
+
+| action | meaning |
+|--------|---------|
+| `+` | label as valuable |
+| `-` | label as not interested |
+| `q` | add to queue (no label) |
+| `+q` | label as valuable AND add to queue |
+| `-q` | label as not interested AND add to queue |
+| `s` | skip (no operation) |
+
+Lines starting with `#` are treated as comments and ignored.
 
 ---
 
@@ -107,7 +136,7 @@ Presents paginated results. The user selects entries by number across multiple p
 \pd clear    # clear the entire queue
 ```
 
-`\pd clear` is the only supported way to reset the queue from within fairing. The payload consumer should not modify `payload_queue.json` directly.
+(`\pd` → `queue`) `\pd clear` is the only supported way to reset the queue from within fairing. The payload consumer should not modify `payload_queue.json` directly.
 
 ---
 

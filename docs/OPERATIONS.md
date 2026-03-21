@@ -187,29 +187,29 @@ Interactive restore flow:
 
 ---
 
-### `\pd` — Payload Queue
+### `\pd` — Queue
 
 ```
 \pd
 \pd clear
 ```
 
-`\pd`: view current `payload_queue.json` contents.
+(`\pd` → `queue`) `\pd`: view current `payload_queue.json` contents.
 `\pd clear`: clear the queue (with confirmation).
 
 ---
 
-### `\ps` — Payload Search
+### `\ps` — Queue Search
 
 ```
 \ps [english keywords]
 ```
 
-Browse or search all known articles for payload queuing. Without keywords, shows all articles (paginated, newest first). With keywords, filters by title (AND-matched, case-insensitive). Navigate with `n`/`p`, select entries by number across pages, confirm to add to `payload_queue.json`. Optionally label selected articles.
+(`\ps` → `queue_search`) Browse or search all known articles for payload queuing. Without keywords, shows all articles (paginated, newest first). With keywords, filters by title (AND-matched, case-insensitive). Navigate with `n`/`p`, select entries by number across pages, confirm to add to `payload_queue.json`. Optionally label selected articles.
 
 ---
 
-### `\sd` — Send by ID
+### `\sd` — Enqueue by ID
 
 ```
 \sd <article_id>
@@ -225,7 +225,30 @@ Look up an article by its 16-hex `article_id` and add it to `payload_queue.json`
 \fb <article_id>
 ```
 
-Label a specific article as relevant (`+`) or not interested (`-`). Use after reading a full article via the payload consumer to record a high-quality judgment. Triggers `maybe_auto_train()` after saving.
+(`\fb` → `label`) Label a specific article as relevant (`+`) or not interested (`-`). Use after reading a full article via the payload consumer to record a high-quality judgment. Triggers `maybe_auto_train()` after saving.
+
+---
+
+### `\im` — Batch Import
+
+```
+\im <file.csv>
+```
+
+(`\im` → `import_csv`) Reads a CSV file and processes each row. Supports labeling, queuing, or both in a single pass. Triggers `maybe_auto_train()` if any labels were saved.
+
+CSV format — two columns, no header required:
+
+| action | meaning |
+|--------|---------|
+| `+` | label as valuable |
+| `-` | label as not interested |
+| `q` | add to payload queue (no label) |
+| `+q` | label as valuable AND add to queue |
+| `-q` | label as not interested AND add to queue |
+| `s` | skip (no operation) |
+
+Lines starting with `#` are ignored. Articles not found in the search pool are skipped with a count in the summary.
 
 ---
 

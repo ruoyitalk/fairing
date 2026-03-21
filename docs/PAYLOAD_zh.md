@@ -75,28 +75,57 @@ article_id = sha256(normalize_url(url))[:16]
 
 ---
 
-## 三种加入方式
+## 四种加入方式
 
 ### 1. `\rate` / `\rate --ext` 中按 `d`
 
 打标卡片界面按 `d` 立即入队，可选同时标注为有价值。卡片保持显示，打标流程不中断。
 
-### 2. `\sd <id>` — 按 ID 发送
+### 2. `\sd <id>` — 按 ID 入队
 
 ```
 \sd a1b2c3d4e5f6a7b8
 ```
 
-在搜索池中按 `article_id` 查找文章，确认后入队。
+（`\sd` → `enqueue`）在搜索池中按 `article_id` 查找文章，确认后入队。
 
-### 3. `\ps [关键词]` — Payload 搜索
+### 3. `\ps [关键词]` — 队列搜索
 
 ```
 \ps                   # 浏览全部文章（翻页）
 \ps query optimizer   # 按标题关键词过滤
 ```
 
-分页展示结果，跨页选择文章编号，确认后批量入队。
+（`\ps` → `queue_search`）分页展示结果，跨页选择文章编号，确认后批量入队。
+
+### 4. `\im <file.csv>` — 批量导入
+
+```
+\im ~/Downloads/articles.csv
+```
+
+（`\im` → `import_csv`）读取 CSV 文件，逐行处理。支持打标、入队或两者同时操作。
+
+CSV 格式——两列，无需表头：
+
+```csv
+article_id,action
+5e07b775ab1f3af6,+q
+a1b2c3d4e5f6a7b8,-
+deadbeef00000001,q
+cafebabe12345678,s
+```
+
+| action | 含义 |
+|--------|------|
+| `+` | 标注为有价值 |
+| `-` | 标注为不感兴趣 |
+| `q` | 仅入队（不打标） |
+| `+q` | 标注有价值 **且** 入队 |
+| `-q` | 标注不感兴趣 **且** 入队 |
+| `s` | 跳过（不做任何操作） |
+
+以 `#` 开头的行视为注释，自动忽略。
 
 ---
 
@@ -107,7 +136,7 @@ article_id = sha256(normalize_url(url))[:16]
 \pd clear    # 清空队列
 ```
 
-`\pd clear` 是从 fairing 内部重置队列的唯一支持方式。payload 消费方不应直接修改 `payload_queue.json`。
+（`\pd` → `queue`）`\pd clear` 是从 fairing 内部重置队列的唯一支持方式。payload 消费方不应直接修改 `payload_queue.json`。
 
 ---
 

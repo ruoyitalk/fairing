@@ -1714,7 +1714,7 @@ class Shell(cmd.Cmd):
             console.print(Panel(
                 "payload 队列为空\n\n"
                 "[dim]在 [cyan]\\rate[/cyan] 中按 [magenta]d[/magenta] 加入文章，"
-                "或用 [cyan]\\ps <关键词>[/cyan] 搜索添加[/dim]",
+                "或用 [cyan]\\ps[/cyan] 搜索添加[/dim]",
                 border_style="dim",
             ))
             return
@@ -1736,8 +1736,8 @@ class Shell(cmd.Cmd):
         """Browse and search all known articles, add selection to payload queue.
 
   Usage:
-    psearch                  browse all articles (paginated, newest first)
-    psearch <keyword(s)>     filter by English title keywords (case-insensitive)
+    queue_search             browse all articles (paginated, newest first)
+    queue_search <keyword(s)>  filter by English title keywords (case-insensitive)
 
   Navigation: n / p  page · <number(s)> select · q quit"""
         _clear()
@@ -1848,8 +1848,8 @@ class Shell(cmd.Cmd):
         ids = line.split()
         if not ids:
             console.print(Panel(
-                "[yellow]用法: send <article_id> [article_id2 ...][/yellow]\n"
-                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\ps[/cyan] 中显示[/dim]",
+                "[yellow]用法: enqueue <article_id> [article_id2 ...][/yellow]\n"
+                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\ps[/cyan]、[cyan]\\li[/cyan] 中显示[/dim]",
                 border_style="yellow",
             ))
             return
@@ -1881,8 +1881,8 @@ class Shell(cmd.Cmd):
         aid = line.strip()
         if not aid:
             console.print(Panel(
-                "[yellow]用法: fb <article_id>[/yellow]\n"
-                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\ps[/cyan] 中显示[/dim]",
+                "[yellow]用法: label <article_id>[/yellow]\n"
+                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\ps[/cyan]、[cyan]\\li[/cyan] 中显示[/dim]",
                 border_style="yellow",
             ))
             return
@@ -2262,10 +2262,10 @@ class Shell(cmd.Cmd):
         _show_model_status()
 
     def do_rebuild(self, _line: str) -> None:
-        """Rebuild today's Obsidian/NotebookLM files without sending email.
+        """Rebuild today's Markdown digest from cached data without sending email.
 
         Useful on secondary devices: pull the latest articles from the sync
-        directory and regenerate output files locally. No email is sent.
+        directory and regenerate the digest locally. No email is sent.
         """
         from dotenv import load_dotenv
         load_dotenv(override=True)

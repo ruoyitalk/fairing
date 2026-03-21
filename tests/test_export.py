@@ -366,3 +366,77 @@ def test_import_csv_ignores_unknown_action(monkeypatch, tmp_path):
 
     from fairing.trainer import load_feedback
     assert load_feedback() == []
+
+
+def test_import_csv_labels_negative(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for
+    from fairing.trainer import load_feedback
+    url = "https://example.com/article6"
+    _seed_index(tmp_path, [{"url": url, "title": "T6", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "-")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    assert any(f["url"] == url and f["label"] == -1 for f in load_feedback())
+
+
+def test_import_csv_negative_and_queue(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for, load_payload_queue
+    from fairing.trainer import load_feedback
+    url = "https://example.com/article7"
+    _seed_index(tmp_path, [{"url": url, "title": "T7", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "-q")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    assert any(f["url"] == url and f["label"] == -1 for f in load_feedback())
+    assert any(e["article_id"] == aid for e in load_payload_queue())
+
+
+def test_import_csv_not_found_article(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _seed_index(tmp_path, [])
+    csv_path = _make_csv(tmp_path, [("0000000000000000", "+")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    from fairing.trainer import load_feedback
+    assert load_feedback() == []
+
+
+def test_import_csv_missing_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    printed = []
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: printed.append(a)})())
+    m.Shell().do_import_csv(str(tmp_path / "nonexistent.csv"))
+    # Should print an error panel, not crash
+    assert printed
+
+
+def test_import_csv_comments_ignored(monkeypatch, tmp_path):
+    """Lines starting with # should be skipped."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for
+    from fairing.trainer import load_feedback
+    url = "https://example.com/article8"
+    _seed_index(tmp_path, [{"url": url, "title": "T8", "source": "S"}])
+    aid = article_id_for(url)
+    p = tmp_path / "batch.csv"
+    p.write_text(f"# this is a comment\n{aid},+\n", encoding="utf-8")
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(p))
+
+    assert any(f["url"] == url and f["label"] == 1 for f in load_feedback())
