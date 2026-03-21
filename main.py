@@ -69,19 +69,20 @@ _SHORTCUTS: dict[str, str] = {
     r"\bk":   "backup",
     r"\rs":   "restore",
     r"\re":   "resend",
-    r"\dl":   "remd",
+    r"\dl":   "rebuild",
     r"\c":    "config",
     r"\e":    "env",
     r"\l":    "log",
-    r"\h":    "shortcuts",
-    r"\?":    "shortcuts",
+    r"\h":    "help",
+    r"\?":    "help",
     r"\t":    "toggle",
     r"\lb":   "labels",
-    r"\pd":   "payload",
-    r"\ps":   "psearch",
-    r"\sd":   "send",
-    r"\fb":   "fb",
-    r"\slr":  "suspect",
+    r"\pd":   "queue",
+    r"\ps":   "queue_search",
+    r"\sd":   "enqueue",
+    r"\fb":   "label",
+    r"\slr":  "label_review",
+    r"\im":   "import_csv",
     r"\li":   "license",
     r"\q":    "quit",
 }
@@ -1295,9 +1296,9 @@ def _show_shortcuts() -> None:
         (r"\lb",   "labels",       "[英文关键词]",              "标注记录管理：搜索 · 翻页 · 修改"),
         ("",       "",             "",                          ""),
         (r"\ms",   "model_status", "",                          "分类器状态 · 训练历史 · 语义信号词"),
-        (r"\slr",  "suspect",      "",                          "审查可疑标注（模型与判断分歧 >60%）"),
+        (r"\slr",  "label_review", "",                          "审查可疑标注（模型与判断分歧 >60%）"),
         (r"\re",   "resend",       "",                          "重建今日文章列表并强制重发邮件"),
-        (r"\dl",   "remd",         "",                          "重建今日摘要文件（不发邮件，供从设备同步使用）"),
+        (r"\dl",   "rebuild",      "",                          "重建今日摘要文件（不发邮件，供从设备同步使用）"),
         ("",       "",             "",                          ""),
         (r"\t",    "toggle",       "<N>",                       "按编号开启 / 关闭 RSS 源"),
         (r"\c",    "config",       "",                          "所有 RSS 源 · 7 天文章量 · 距上次收录时长"),
@@ -1306,13 +1307,14 @@ def _show_shortcuts() -> None:
         (r"\bk",   "backup",       "",                          "手动触发数据备份"),
         (r"\rs",   "restore",      "",                          "从历史备份回档（差异对比 + 确认）"),
         ("",       "",             "",                          ""),
-        (r"\pd",   "payload",      "[clear]",                   "查看全文下载队列；clear 清空"),
-        (r"\ps",   "psearch",      "<英文关键词>",              "搜索文章并加入下载队列"),
-        (r"\sd",   "send",         "<id> [id2 ...]",            "按 article_id（16 位）加入下载队列"),
-        (r"\fb",   "fb",           "<article_id>",              "标注指定文章（+/- 有价值/不感兴趣）"),
+        (r"\pd",   "queue",        "[clear]",                   "查看 payload 队列；clear 清空"),
+        (r"\ps",   "queue_search", "[英文关键词]",              "浏览全部文章或按关键词过滤；加入 payload 队列"),
+        (r"\sd",   "enqueue",      "<id> [id2 ...]",            "按 article_id 加入 payload 队列"),
+        (r"\fb",   "label",        "<article_id>",              "标注指定文章（+/- 有价值/不感兴趣）"),
+        (r"\im",   "import_csv",   "<file.csv>",                "批量打标 / 入队（CSV 格式）"),
         ("",       "",             "",                          ""),
         (r"\li",   "license",      "",                          "查看 MIT 许可证"),
-        (r"\?  \h","shortcuts",    "",                          "显示本帮助"),
+        (r"\?  \h","help",         "",                          "显示本帮助"),
         (r"\q",    "quit",         "",                          "退出"),
     ]
     for shortcut, command, params, desc in _CMD_ROWS:
@@ -1695,7 +1697,7 @@ class Shell(cmd.Cmd):
                         continue
                 console.print(f"  [yellow]请输入编号或 n / p / q[/yellow]")
 
-    def do_payload(self, line: str) -> None:
+    def do_queue(self, line: str) -> None:
         """Show or manage the payload download queue.
 
   Usage:
@@ -1730,7 +1732,7 @@ class Shell(cmd.Cmd):
         ))
         console.print("  [dim]使用 [cyan]payload clear[/cyan] 清空队列[/dim]")
 
-    def do_psearch(self, line: str) -> None:
+    def do_queue_search(self, line: str) -> None:
         """Browse and search all known articles, add selection to payload queue.
 
   Usage:
@@ -1835,11 +1837,11 @@ class Shell(cmd.Cmd):
                     })
                     console.print(f"  [green]✓ 已标注有价值:[/green] {a['title'][:50]}")
 
-    def do_send(self, line: str) -> None:
+    def do_enqueue(self, line: str) -> None:
         """Add article(s) to payload queue by article_id.
 
   Usage:
-    send <article_id> [article_id2 ...]
+    enqueue <article_id> [article_id2 ...]
 
   article_id is the 16-char hex ID shown in \\rate and \\ps."""
         _clear()
@@ -1867,14 +1869,14 @@ class Shell(cmd.Cmd):
                 continue
             _dispatch_to_payload(a, ask_label=True)
 
-    def do_fb(self, line: str) -> None:
-        """Add a post-read positive or negative label by article_id.
+    def do_label(self, line: str) -> None:
+        """Label a specific article by article_id.
 
   Usage:
-    fb <article_id>
+    label <article_id>
 
-  Use after reading a full article via the payload consumer to feed a
-  high-quality label back into fairing's training pool."""
+  Use after reading a full article via the payload consumer to record
+  a high-quality judgment back into fairing's training pool."""
         _clear()
         aid = line.strip()
         if not aid:
@@ -1920,7 +1922,116 @@ class Shell(cmd.Cmd):
         neg = sum(1 for f in feedback_new if f["label"] == -1)
         _show_train_result(result, pos, neg, len(feedback_new))
 
-    def do_suspect(self, _line: str) -> None:
+    def do_import_csv(self, line: str) -> None:
+        """Batch label and/or enqueue articles from a CSV file.
+
+  Usage:
+    import_csv <file.csv>
+
+  CSV format — two columns, no header:
+    article_id,action
+
+  Actions:
+    +    label as valuable
+    -    label as not interested
+    q    add to payload queue (no label)
+    +q   label as valuable AND add to payload queue
+    -q   label as not interested AND add to payload queue
+    s    skip (record only, no operation)
+
+  Example:
+    5e07b775ab1f3af6,+q
+    a1b2c3d4e5f6a7b8,-
+    deadbeef00000001,q
+    cafebabe12345678,s"""
+        _clear()
+        import csv as _csv
+        path_str = line.strip()
+        if not path_str:
+            console.print(Panel(
+                "[yellow]用法: import_csv <file.csv>[/yellow]\n\n"
+                "[dim]CSV 格式：article_id,action\n"
+                "action：+ / - / q / +q / -q / s[/dim]",
+                border_style="yellow",
+            ))
+            return
+        path = Path(path_str).expanduser()
+        if not path.exists():
+            console.print(Panel(f"[yellow]文件不存在: {path}[/yellow]", border_style="yellow"))
+            return
+
+        from fairing.export import find_by_id, add_to_payload_queue
+        from fairing.trainer import load_feedback, save_feedback, maybe_auto_train
+        from fairing.embedder import load_store
+
+        VALID = {"+", "-", "q", "+q", "-q", "s"}
+        rows: list[tuple[str, str]] = []
+        try:
+            with path.open(encoding="utf-8") as f:
+                for r in _csv.reader(f):
+                    if not r or r[0].strip().startswith("#"):
+                        continue
+                    if len(r) < 2:
+                        continue
+                    rows.append((r[0].strip(), r[1].strip().lower()))
+        except Exception as exc:
+            console.print(Panel(f"[red]读取失败: {exc}[/red]", border_style="red"))
+            return
+
+        if not rows:
+            console.print(Panel("[yellow]CSV 文件无有效行[/yellow]", border_style="yellow"))
+            return
+
+        n_labeled = n_queued = n_skipped = n_not_found = n_invalid = 0
+        labeled_any = False
+        feedback = load_feedback()
+
+        for aid, action in rows:
+            if action not in VALID:
+                n_invalid += 1
+                continue
+            if action == "s":
+                n_skipped += 1
+                continue
+            article = find_by_id(aid)
+            if article is None:
+                n_not_found += 1
+                continue
+            if "+" in action or "-" in action:
+                label = 1 if "+" in action else -1
+                save_feedback({
+                    "url":         article["url"],
+                    "title":       article.get("title", ""),
+                    "source":      article.get("source", ""),
+                    "label":       label,
+                    "label_index": len(feedback),
+                    "date":        _today_beijing(),
+                })
+                feedback = load_feedback()
+                n_labeled += 1
+                labeled_any = True
+            if "q" in action:
+                add_to_payload_queue(article)
+                n_queued += 1
+
+        lines = [
+            f"  总行数   [bold]{len(rows)}[/bold]",
+            f"  打标     [green]{n_labeled}[/green] 篇",
+            f"  入队     [magenta]{n_queued}[/magenta] 篇",
+            f"  跳过     [dim]{n_skipped}[/dim] 篇",
+        ]
+        if n_not_found: lines.append(f"  未找到   [yellow]{n_not_found}[/yellow] 篇")
+        if n_invalid:   lines.append(f"  无效行   [red]{n_invalid}[/red] 行")
+        console.print(Panel("\n".join(lines), title="[bold green]批量导入完成[/bold green]",
+                            border_style="green"))
+
+        if labeled_any:
+            feedback = load_feedback()
+            pos = sum(1 for f in feedback if f["label"] ==  1)
+            neg = sum(1 for f in feedback if f["label"] == -1)
+            _show_train_result(maybe_auto_train(load_store()), pos, neg, len(feedback))
+
+    def do_label_review(self, _line: str) -> None:
         """Review labels where the model strongly disagrees with your judgment.
 
   Shows articles where model prediction conflicts with the saved label
@@ -2150,7 +2261,7 @@ class Shell(cmd.Cmd):
         _clear()
         _show_model_status()
 
-    def do_remd(self, _line: str) -> None:
+    def do_rebuild(self, _line: str) -> None:
         """Rebuild today's Obsidian/NotebookLM files without sending email.
 
         Useful on secondary devices: pull the latest articles from the sync
@@ -2382,13 +2493,8 @@ class Shell(cmd.Cmd):
         else:
             console.print("[yellow]No data files found to back up.[/yellow]")
 
-    def do_shortcuts(self, _line: str) -> None:
-        r"""Show all shortcuts and key bindings (\r, \rate, \ms, \c, \e, \l, \h, \?, \q)."""
-        _clear()
-        _show_shortcuts()
-
     def do_help(self, _line: str) -> None:
-        """Show help (same as shortcuts)."""
+        r"""Show all shortcuts and key bindings (\r, \rate, \ms, \c, \e, \l, \h, \?, \q)."""
         _clear()
         _show_shortcuts()
 
