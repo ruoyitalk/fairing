@@ -1288,7 +1288,7 @@ def _show_shortcuts() -> None:
     cmd_t.add_column("说明")
     _CMD_ROWS = [
         # shortcut    command           params                        description
-        (r"\r",    "run",          "[--no-md] [--no-mail] [--chinese] [--force]",
+        (r"\r",    "run",          "[--no-mail] [--chinese] [--force]",
                                                                "拉取 RSS · 嵌入评分 · 写摘要 · 发邮件  （参数默认值见下方）"),
         ("",       "",             "",                          ""),
         (r"\rate", "rate",         "[--ext]",                   "必需打标（未完成阻塞 \\r）；--ext 扩展全量未标文章新→旧"),
@@ -1297,7 +1297,7 @@ def _show_shortcuts() -> None:
         (r"\ms",   "model_status", "",                          "分类器状态 · 训练历史 · 语义信号词"),
         (r"\slr",  "suspect",      "",                          "审查可疑标注（模型与判断分歧 >60%）"),
         (r"\re",   "resend",       "",                          "重建今日文章列表并强制重发邮件"),
-        (r"\dl",   "remd",         "[--no-md]",                 "重建今日摘要文件（不发邮件，供从设备同步使用）"),
+        (r"\dl",   "remd",         "",                          "重建今日摘要文件（不发邮件，供从设备同步使用）"),
         ("",       "",             "",                          ""),
         (r"\t",    "toggle",       "<N>",                       "按编号开启 / 关闭 RSS 源"),
         (r"\c",    "config",       "",                          "所有 RSS 源 · 7 天文章量 · 距上次收录时长"),
@@ -1336,7 +1336,6 @@ def _show_shortcuts() -> None:
     args_t.add_column("当前默认",  width=20)
 
     # Output toggles (positive logic, both on by default)
-    args_t.add_row("--no-md",   "禁用摘要 MD 输出",       _on(d["write_md"],  "RUN_MD"))
     args_t.add_row("",          "",                        "")
     args_t.add_row("--no-mail", "跳过发送邮件",            _off(d["no_mail"],  "RUN_NO_MAIL"))
     args_t.add_row("--chinese", "邮件发中文（MD 保持英文）", _off(d["chinese"], "RUN_CHINESE"))
@@ -1348,9 +1347,6 @@ def _show_shortcuts() -> None:
 
 def _load_run_defaults() -> dict:
     """Read run parameter defaults from .env.
-
-    Output flag (positive logic, default on):
-      RUN_MD      — write Markdown digest to NEWS_DIR  (set 'false' to disable)
 
     Modifier flags (default off):
       RUN_CHINESE — email in Chinese
@@ -1367,22 +1363,19 @@ def _load_run_defaults() -> dict:
         return val not in ("0", "false", "no")
 
     return {
-        "chinese":  _bool("RUN_CHINESE"),
-        "no_mail":  _bool("RUN_NO_MAIL"),
-        "write_md": _bool_enabled("RUN_MD"),
+        "chinese": _bool("RUN_CHINESE"),
+        "no_mail": _bool("RUN_NO_MAIL"),
     }
 
 
 
 def run_digest(chinese: bool = False,
-               no_mail: bool = False, force: bool = False,
-               write_md: bool = True) -> None:
+               no_mail: bool = False, force: bool = False) -> None:
     """Fetch, score, and deliver the daily digest end-to-end.
 
-    @param chinese:  translate email to Chinese (MD stays English)
-    @param no_mail:  skip sending the digest email
-    @param force:    bypass the rate-gate check (skip pending label warning)
-    @param write_md: write plain Markdown digest to NEWS_DIR (default True)
+    @param chinese: translate email to Chinese (MD stays English)
+    @param no_mail: skip sending the digest email
+    @param force:   bypass the rate-gate check (skip pending label warning)
     """
     from dotenv import load_dotenv
     load_dotenv(override=True)
@@ -1431,9 +1424,8 @@ def run_digest(chinese: bool = False,
         for i, a in enumerate(articles, 1)
     ], ensure_ascii=False, indent=2), encoding="utf-8")
 
-    if write_md:
-        path, count = write_digest(articles, cfg.news_dir)
-        logger.info("Digest (EN) -> %s  [+%d]", path, count)
+    path, count = write_digest(articles, cfg.news_dir)
+    logger.info("Digest (EN) -> %s  [+%d]", path, count)
 
     mark_seen(articles)
 
@@ -1522,7 +1514,6 @@ class Shell(cmd.Cmd):
         """Run the daily digest.
 
   Flags:
-    --no-md       skip writing Markdown digest to NEWS_DIR
     --no-mail     skip email notification
     --chinese     email in Chinese (MD stays English)
     --force       bypass rate gate (emergency use)"""
@@ -1531,12 +1522,10 @@ class Shell(cmd.Cmd):
         defaults      = _load_run_defaults()
         chinese       = "--chinese"     in args or (defaults["chinese"] and "--no-chinese" not in args)
         no_mail       = "--no-mail"     in args or (defaults["no_mail"] and "--mail" not in args)
-        write_md = defaults["write_md"] and "--no-md" not in args
-        force    = "--force" in args
+        force = "--force" in args
 
         try:
-            run_digest(chinese=chinese, no_mail=no_mail,
-                       force=force, write_md=write_md)
+            run_digest(chinese=chinese, no_mail=no_mail, force=force)
         except Exception as exc:
             logger.error("Run failed: %s", exc)
 
@@ -2438,10 +2427,8 @@ def main() -> None:
         defaults       = _load_run_defaults()
         chinese        = "--chinese"  in args or (defaults["chinese"] and "--no-chinese" not in args)
         no_mail        = "--no-mail"  in args or (defaults["no_mail"] and "--mail" not in args)
-        write_md = defaults["write_md"] and "--no-md" not in args
-        force    = "--force" in args
-        run_digest(chinese=chinese, no_mail=no_mail,
-                   force=force, write_md=write_md)
+        force = "--force" in args
+        run_digest(chinese=chinese, no_mail=no_mail, force=force)
         return
     Shell().cmdloop()
 
