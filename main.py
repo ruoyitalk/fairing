@@ -1511,11 +1511,26 @@ class Shell(cmd.Cmd):
 
     def preloop(self) -> None:
         _clear()
+        from fairing.paths import data_dir
+        from fairing.config import Config
+        cfg = Config()
+
+        data_note = f"  [dim]data  [/dim][green]✓[/green] [dim]{data_dir()}[/dim]"
+        doc_dir   = Path(cfg.obsidian_dir) if cfg.obsidian_dir else None
+        doc_note  = (
+            f"  [dim]docs  [/dim][green]✓[/green] [dim]{doc_dir}[/dim]"
+            if doc_dir else
+            f"  [dim]docs  [/dim][dim]— OBSIDIAN_DIR not set[/dim]"
+        )
+
         console.print(Panel(
             f"[bold cyan]{LOGO}[/bold cyan]"
             f"\n"
             f"  [bold white]Wraps the noise, delivers the signal.[/bold white]\n"
             f"  [dim]A daily feed aggregator · tech blogs, newsletters, research → clean digest[/dim]\n"
+            f"\n"
+            f"{data_note}\n"
+            f"{doc_note}\n"
             f"\n"
             f"  [dim]v{__version__}  JiekerTime <zhangjunjie@apache.org>  MIT[/dim]\n\n"
             f"  [cyan]\\?[/cyan] [dim]shortcuts[/dim]   [cyan]\\li[/cyan] [dim]license[/dim]",
