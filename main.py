@@ -1430,7 +1430,7 @@ def run_digest(chinese: bool = False,
     articles = enrich(articles)
     articles = score_articles(articles)
 
-    # Persist ordered article list for \rd command (score-sorted, same as email)
+    # Persist ordered article list (score-sorted, same as email)
     from fairing.export import article_id_for as _aid
     LAST_RUN().write_text(json.dumps([
         {"idx": i, "url": a["url"], "article_id": _aid(a["url"]),

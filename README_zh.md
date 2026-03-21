@@ -41,9 +41,8 @@ SMTP_PASSWORD=your_163_auth_code
 MAIL_TO=recipient@example.com
 GEMINI_API_KEY=AIzaSy...
 
-# 输出目录
-OBSIDIAN_DIR=~/Documents/ObsidianVault/fairing
-# NOTEBOOKLM_DIR=~/Documents/NotebookLM
+# 输出目录（每日摘要 + NotebookLM 文件）
+NEWS_DIR=~/files/coding/ruoyi_talk/news
 
 # 多端同步
 # DATA_DIR=~/OneDrive/fairing
@@ -87,7 +86,6 @@ python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
 | `\rate` | `rate` | `[--ext]` | 每日必需打标批次；`--ext` 扩展至所有未标文章 |
 | `\lb` | `label_browser` | `[关键词]` | 按关键词搜索并修改历史标注 |
 | `\ms` | `model_status` | | 分类器状态、标注统计、信号词 |
-| `\rd` | `read` | `[N] [--zh]` | 按编号详读文章；不带 N 则列出所有 |
 | `\re` | `resend` | | 重建今日文章列表并强制重发邮件 |
 | `\dl` | `remd` | | 重建 Obsidian/NotebookLM 文件，不发邮件 |
 | `\t` | `toggle` | `<N>` | 按编号启用或禁用 RSS 订阅源 |
@@ -150,9 +148,8 @@ DATA_DIR=~/OneDrive/fairing
 | `GEMINI_API_KEY` | 是* | — | Gemini 翻译 Key（仅发英文邮件时可不填） |
 | `DATA_DIR` | 否 | 项目根目录 | 所有运行时数据文件 |
 | `BACKUP_DIR` | 否 | `~/Documents/fairing/data_bak` | 备份目标目录 |
-| `OBSIDIAN_DIR` | 否 | `~/Documents/fairing-vault` | Obsidian vault 输出目录 |
-| `NOTEBOOKLM_DIR` | 否 | （空） | NotebookLM 输出目录；不填则禁用 |
-| `FIRECRAWL_API_KEY` | 否 | — | Firecrawl 全文抓取，供 `\rd` 使用 |
+| `NEWS_DIR` | 否 | `~/Documents/fairing-news` | 输出根目录；日摘 → `NEWS_DIR/YYYY-WXX/`；NotebookLM → `NEWS_DIR/notebooklm/` |
+| `FIRECRAWL_API_KEY` | 否 | — | Firecrawl 摘要补充抓取 |
 | `TRANSLATOR` | 否 | `gemini` | 翻译后端：`gemini` / `openai` / `claude` |
 | `MAIL_SPLIT_N` | 否 | （关闭） | 将摘要邮件拆分为 N 封 |
 | `TOP_N` | 否 | `20` | 邮件中全文展示的文章数 |
