@@ -205,3 +205,60 @@ def test_write_returns_correct_path(monkeypatch, tmp_path):
     from fairing.paths import payload_queue_file
     p = payload_queue_file()
     assert p.name == "payload_queue.json"
+
+
+# ── _dispatch_to_payload ────────────────────────────────────────────────────────
+
+def _make_article(url: str = "https://example.com/art") -> dict:
+    return {"url": url, "title": "Test Article", "source": "TestSrc"}
+
+
+def test_dispatch_returns_false_when_ask_label_false(monkeypatch, tmp_path):
+    """ask_label=False should add to queue and return False without prompting."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    result = m._dispatch_to_payload(_make_article(), ask_label=False)
+    assert result is False
+
+
+def test_dispatch_returns_false_when_already_positive(monkeypatch, tmp_path):
+    """Article already labeled positive: no prompt, return False."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    url = "https://example.com/already-pos"
+    # Pre-write a positive label
+    from fairing.trainer import save_feedback
+    save_feedback({"url": url, "title": "T", "source": "S", "label": 1,
+                   "label_index": 0, "date": "2026-03-21"})
+    prompted = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": prompted.append(prompt) or "")
+    result = m._dispatch_to_payload({"url": url, "title": "T", "source": "S"}, ask_label=True)
+    assert result is False
+    assert not prompted, "Should not prompt when article is already labeled positive"
+
+
+def test_dispatch_returns_true_when_user_confirms(monkeypatch, tmp_path):
+    """User answers 'y' to the label prompt: saves feedback, returns True."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+    result = m._dispatch_to_payload(_make_article(), ask_label=True)
+    assert result is True
+    from fairing.trainer import load_feedback
+    saved = load_feedback()
+    assert any(f["url"] == "https://example.com/art" and f["label"] == 1 for f in saved)
+
+
+def test_dispatch_returns_false_when_user_declines(monkeypatch, tmp_path):
+    """User answers 'n' to the label prompt: no feedback saved, returns False."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    result = m._dispatch_to_payload(_make_article(), ask_label=True)
+    assert result is False
+    from fairing.trainer import load_feedback
+    assert load_feedback() == []

@@ -91,18 +91,6 @@ Displays:
 
 ---
 
-### `\rd` — Deep-Read Article
-
-```
-\rd [N] [--zh]
-```
-
-Without `N`: list all articles from the last `\r` run, sorted by score.
-
-With `N`: fetch full text of article N (using Firecrawl if `FIRECRAWL_API_KEY` set, otherwise `requests`). Open in `$EDITOR`. With `--zh`: append Chinese translation below the English text.
-
----
-
 ### `\re` — Resend Email
 
 ```
@@ -211,10 +199,10 @@ Interactive restore flow:
 ### `\ps` — Payload Search
 
 ```
-\ps <english keywords>
+\ps [english keywords]
 ```
 
-Search all known articles by title for payload queuing. Keywords are AND-matched (case-insensitive). Paginated results; select entries and confirm to add to `payload_queue.json`. Optionally label selected articles.
+Browse or search all known articles for payload queuing. Without keywords, shows all articles (paginated, newest first). With keywords, filters by title (AND-matched, case-insensitive). Navigate with `n`/`p`, select entries by number across pages, confirm to add to `payload_queue.json`. Optionally label selected articles.
 
 ---
 

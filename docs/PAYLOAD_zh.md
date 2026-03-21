@@ -1,23 +1,39 @@
-> English: [PAYLOAD.md](PAYLOAD.md)
+> English version: [PAYLOAD.md](PAYLOAD.md)
 
-# fairing — Payload 集成参考手册
+# fairing — Payload 集成参考
 
-**版本**: v1.0.0
+**版本**：v1.1.0
 
 ---
 
-## 流水线位置
+## 架构边界
+
+fairing 和 payload 是两个职责明确分离的服务：
 
 ```
-fairing（run_digest / \rate / \rate --ext / \sd / \ps）
-  └─ payload_queue.json          待推送文章存根
-
-payload（外部消费方）
-  └─ 读取 payload_queue.json
-  └─ 按 article_id 去重
-  └─ 抓取全文内容
-  └─ 管理自身状态
+┌─────────────────────────────────────────┐
+│  fairing                                │
+│                                         │
+│  RSS 发现 → 摘要抓取（不全时补充）     │
+│  → 嵌入 → 评分 → 打标                  │
+│  → 邮件摘要 → payload_queue.json        │
+└────────────────────┬────────────────────┘
+                     │  文章 stub
+                     ▼
+┌─────────────────────────────────────────┐
+│  payload 消费方                         │
+│                                         │
+│  全文抓取 → 阅读 / 归档                │
+│  → 阅读后判断                           │
+│  → 写回 feedback.jsonl                  │
+└─────────────────────────────────────────┘
 ```
+
+**fairing 负责**：发现文章、过滤噪音、生成嵌入、训练相关性分类器、发送每日摘要邮件。它回答的是"哪些文章值得读"。
+
+**payload 消费方负责**：抓取全文、呈现给用户深度阅读、决定后续处理方式（归档、标注、送入 LLM 等）。
+
+fairing 不代替用户阅读全文。`\rate` 中的 `o` 键在浏览器打开原文，这是 fairing 阅读支持的全部范围。
 
 ---
 
@@ -27,37 +43,43 @@ payload（外部消费方）
 article_id = sha256(normalize_url(url))[:16]
 ```
 
-- 16 位十六进制 = 64 比特熵。
-- 碰撞概率：100 年日常运营约 9×10⁻⁸。
-- `normalize_url()` 去除追踪参数并规范化 scheme/host，同一篇文章的不同 URL 形式映射到相同 ID。
+- 16 位十六进制 = 64 bit 熵，单文章碰撞概率可忽略。
+- `normalize_url()` 去除追踪参数并归一化 scheme/host，同一文章在不同来源映射到相同 ID。
+- payload 消费方必须以 `article_id` 作为主去重键，不能用原始 URL。
 
 ---
 
 ## payload_queue.json 结构
 
-队列中每个条目为一个 JSON 对象：
+每条记录是一个 JSON 对象：
 
 ```json
-{"article_id": "a1b2c3d4e5f6a7b8", "url": "https://...", "title": "...", "source": "HN", "queued_date": "2026-03-21"}
+{
+  "article_id": "a1b2c3d4e5f6a7b8",
+  "url":        "https://...",
+  "title":      "...",
+  "source":     "HN",
+  "queued_date": "2026-03-22"
+}
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `article_id` | string | `sha256(normalize_url(url))[:16]`，16 位十六进制 |
-| `url` | string | 文章 URL（原始，非规范化） |
-| `title` | string | 加入队列时的文章标题 |
-| `source` | string | RSS 源名称 |
-| `queued_date` | string | 加入队列的北京日期（YYYY-MM-DD） |
+| `article_id` | string | `sha256(normalize_url(url))[:16]` |
+| `url` | string | 原始文章 URL（未归一化） |
+| `title` | string | 入队时的标题 |
+| `source` | string | RSS 来源名称 |
+| `queued_date` | string | 入队的北京日期（YYYY-MM-DD） |
 
-该文件为 JSON 数组。fairing 追加条目并在写入前按 `article_id` 去重。
+文件为 JSON 数组，fairing 写入前按 `article_id` 去重。
 
 ---
 
-## 三种添加方式
+## 三种加入方式
 
-### 1. 打标时按 `d` 键（`\rate` / `\rate --ext`）
+### 1. `\rate` / `\rate --ext` 中按 `d`
 
-打标卡片界面中按 `d`，将当前文章立即加入 `payload_queue.json`，无需离开卡片。
+打标卡片界面按 `d` 立即入队，可选同时标注为有价值。卡片保持显示，打标流程不中断。
 
 ### 2. `\sd <id>` — 按 ID 发送
 
@@ -65,101 +87,56 @@ article_id = sha256(normalize_url(url))[:16]
 \sd a1b2c3d4e5f6a7b8
 ```
 
-在搜索池（见下文）中按 `article_id` 查找文章，展示元信息并提示确认：
+在搜索池中按 `article_id` 查找文章，确认后入队。
+
+### 3. `\ps [关键词]` — Payload 搜索
 
 ```
-Title:  Distributed Query Optimizer in CockroachDB
-Source: HN
-Date:   2026-03-21
-
-Send to payload queue? [y/n]:
+\ps                   # 浏览全部文章（翻页）
+\ps query optimizer   # 按标题关键词过滤
 ```
 
-确认后，可选择为该文章打标：
+分页展示结果，跨页选择文章编号，确认后批量入队。
+
+---
+
+## 队列管理
 
 ```
-Label this article? [+/-/n]:
+\pd          # 查看当前队列内容
+\pd clear    # 清空队列
 ```
 
-### 3. `\ps <关键词>` — Payload 搜索（批量）
+`\pd clear` 是从 fairing 内部重置队列的唯一支持方式。payload 消费方不应直接修改 `payload_queue.json`。
 
-```
-\ps query optimizer
-```
+---
 
-在搜索池中按关键词（大小写不敏感，AND 逻辑）搜索文章，分页展示结果。用户选择条目后批量确认：
+## payload 消费方应做的事
 
-```
-Send 3 articles to payload queue? [y/n]:
-```
-
-确认后，可选择为每篇所选文章打标。
+1. **轮询** `payload_queue.json`（按计划或按需）。
+2. **去重**：以 `article_id` 对比自身已处理历史。
+3. **抓取**全文（Firecrawl、Jina、requests 或任何方式）。
+4. **呈现**内容供用户深度阅读。
+5. **清空**队列（`\pd clear`）或自行维护已消费 ID 列表。
 
 ---
 
 ## 搜索池构建
 
-`\sd` 和 `\ps` 从以下三个来源合并构建搜索池：
+`\sd` 和 `\ps` 的搜索池由三个来源按 `article_id` 合并：
 
 | 优先级 | 来源 | 说明 |
 |--------|------|------|
-| 1（主要） | `title_index.jsonl` | 所有已见文章；最全面 |
-| 2（备用） | `scoring_store.jsonl` | 有缓存嵌入的文章；是 title_index 的子集 |
-| 3（补充） | `last_run_articles.json` | 最近一次 `\r` 的输出；覆盖最新文章 |
-
-三个来源按 `article_id` 合并去重，`title_index.jsonl` 的标题和元信息优先。
-
----
-
-## 队列管理（`\pd`）
-
-```
-\pd          # 查看当前队列内容
-\pd clear    # 清空整个队列
-```
-
-`\pd` 以编号列表展示队列，包含 `article_id`、标题、来源和加入日期。
-
-`\pd clear` 在清空 `payload_queue.json` 前会提示确认。
-
----
-
-## 数据文件写入汇总
-
-| 操作 | 写入文件 |
-|------|----------|
-| 打标时按 `d` | `payload_queue.json`（追加 + 去重） |
-| `\sd <id>` 确认后 | `payload_queue.json`（追加 + 去重） |
-| `\ps` 批量确认后 | `payload_queue.json`（追加 + 去重） |
-| `\sd` / `\ps` 后可选打标 | `feedback.jsonl`（追加） |
-| `\pd clear` 确认后 | `payload_queue.json`（清空） |
-
----
-
-## Payload 消费方职责
-
-fairing 只向 `payload_queue.json` 写入文章存根，消费方负责：
-
-1. **读取** `payload_queue.json`，提取 `article_id` 和 `url`。
-2. **按 `article_id` 去重**，对照自身已处理历史。
-3. **抓取全文**（通过 Firecrawl、requests 或自有方式）。
-4. **管理自身状态**——fairing 不追踪哪些条目已被消费。
-5. **不修改** `payload_queue.json`——队列清空请在 fairing 内使用 `\pd clear`。
+| 1 | `title_index.jsonl` | 所有见过的文章 |
+| 2 | `scoring_store.jsonl` | 有嵌入缓存的文章 |
+| 3 | `last_run_articles.json` | 最近一次 `\r` 的输出 |
 
 ---
 
 ## 动态回溯窗口
 
-fairing 使用动态回溯窗口，避免因 `\r` 延迟运行而遗漏文章。
-
 ```python
-effective_window = max(LOOKBACK_MIN_HOURS, hours_since_last_run)
-LOOKBACK_MIN_HOURS = 25   # 最小值：始终超过一个自然日
+effective_window = max(25, hours_since_last_run)
 ```
 
-首次运行（无 `last_run_time` 记录）时，以 `2026-03-20` 为起始纪元，该日期后发布的文章均可进入候选。
-
-这意味着：
-- 正常每日运行：窗口 = 25 小时（覆盖调度抖动）。
-- 跳过一天：窗口 = 49+ 小时（自动追赶）。
-- Payload 消费方应预期文章来自不固定长度的时间段。
+首次运行以 `2026-03-20` 为起点。跳过的天数会自动补抓。payload 消费方应预期收到来自不固定时间范围的文章。

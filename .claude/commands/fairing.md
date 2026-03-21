@@ -19,7 +19,7 @@ fairing/
   writer.py          — write_obsidian(), write_notebooklm(), archive_vault()
   translator.py      — Gemini-based EN→ZH translation (email only, training data stays EN)
   backup.py          — timestamped daily backups, diff_summary(), restore_backup()
-  reader.py          — deep-read: fetch full text (Firecrawl or requests), open in $EDITOR
+  reader.py          — URL type detection, browser open, fetch_full() for excerpt enrichment only
   export.py          — payload queue management: add, search, send_by_id, list
 data/
   feedback.jsonl     — append-only training labels (url, title, source, label, date)
@@ -56,7 +56,7 @@ All data file paths are resolved through `paths.py` helpers. Key functions:
 | `DATA_DIR/scoring_store.jsonl` | Embedding cache (url→384-dim vector) |
 | `DATA_DIR/rate_pending.json` | Today's labeling sample + done_urls progress |
 | `DATA_DIR/title_index.jsonl` | All articles ever seen; pool for `\rate --ext` and `\lb` |
-| `DATA_DIR/last_run_articles.json` | Score-sorted article list for `\rd` command |
+| `DATA_DIR/last_run_articles.json` | Score-sorted article list from last `\r` run |
 | `DATA_DIR/last_run_time` | Timestamp of last `\r` run (for dynamic lookback) |
 | `DATA_DIR/payload_queue.json` | Queued article stubs for external payload consumer |
 | `DATA_DIR/feed_errors.json` | Feed fetch errors from last `\r` |
@@ -72,7 +72,6 @@ All data file paths are resolved through `paths.py` helpers. Key functions:
 | `\rate` | `rate` | `[--ext]` | Mandatory daily labeling; `--ext` = all unlabeled from title_index |
 | `\lb` | `label_browser` | `[keywords]` | Browse and edit labeled articles; keyword search (AND, case-insensitive) |
 | `\ms` | `model_status` | | Classifier status, label counts, signal words |
-| `\rd` | `read` | `[N] [--zh]` | Deep-read article by index; list all if no N |
 | `\re` | `resend` | | Rebuild today's full article list and force-send email |
 | `\dl` | `remd` | | Rebuild Obsidian/NotebookLM files without email |
 | `\t` | `toggle` | `<N>` | Enable/disable an RSS source by index |
@@ -82,7 +81,7 @@ All data file paths are resolved through `paths.py` helpers. Key functions:
 | `\bk` | `backup` | | Manual backup trigger |
 | `\rs` | `restore` | | Restore from backup with diff + confirmation |
 | `\pd` | `payload_queue` | `[clear]` | View or clear payload_queue.json |
-| `\ps` | `payload_search` | `<keywords>` | Search articles by title, batch-add to payload queue |
+| `\ps` | `payload_search` | `[keywords]` | Browse all articles or filter by title; paginated; batch-add to payload queue |
 | `\sd` | `send_by_id` | `<article_id>` | Add specific article to payload queue by 16-hex ID |
 | `\li` | `list_index` | | List recent entries in title_index.jsonl |
 | `\?` `\h` | `shortcuts` | | Show command reference |
@@ -108,11 +107,11 @@ Three-tier labeling system:
 \rate  (Tier 1 — Mandatory Daily Batch)
   → _run_mandatory_rate(): label today's sample_urls
   → rate-gate: blocks next \r until completed=true
-  keys: + / - / n / o / r / d / p / s
+  keys: + / - / n / o / d / p / s
 
 \rate --ext  (Tier 2 — Extended Labeling)
   → prerequisite: rate_pending.completed == true
-  → pool: all unlabeled from title_index.jsonl, newest-first, no time limit
+  → pool: all unlabeled from title_index.jsonl, random order, no time limit
   → same card interface as Tier 1
 
 \lb [keywords]  (Tier 3 — Label Browser)
@@ -163,8 +162,7 @@ When updating docs, maintain both English and Chinese versions:
 - `article_id = sha256(normalize_url(url))[:16]` — stable 16-hex identifier
 - Dynamic lookback: `effective_window = max(25, hours_since_last_run)`; first run uses 2026-03-20 epoch
 - Backups go to `BACKUP_DIR` (default `~/Documents/fairing/data_bak`), 7-day retention
-- Readnotes go to `READNOTES_DIR` (default `$OBSIDIAN_DIR/readnotes/`)
-- Training data always reflects English content; `--chinese` translates only the email copy
+n- Training data always reflects English content; `--chinese` translates only the email copy
 - `payload_queue.json` stores article stubs; consumer is responsible for full fetch and state
 
 ## Development Workflow (mandatory for every change)
@@ -172,7 +170,7 @@ When updating docs, maintain both English and Chinese versions:
 Every code change — no matter how small — must be accompanied by:
 
 1. **Tests**: add or update tests in `tests/test_<module>.py` covering the changed behaviour.
-   Run `python -m pytest tests/ -v` and ensure **all 126+ tests pass** before committing.
+   Run `python -m pytest tests/ -v` and ensure **all 120+ tests pass** before committing.
 2. **Docstrings / comments**: update the affected function/module docstrings in English.
 3. **Skills file**: update this file (`/.claude/commands/fairing.md`) if commands, flags,
    data files, or workflows change.
@@ -194,3 +192,4 @@ Every code change — no matter how small — must be accompanied by:
 - To retrain model: delete `personal_model.pkl` and `personal_scaler.pkl` from `DATA_DIR`, then `\rate`
 - `\li` helps find article_id values for `\sd`
 - `\pd clear` is the only supported way to reset the payload queue from within fairing
+- Full-text reading is the payload consumer's responsibility; fairing only opens the browser (`o` key)

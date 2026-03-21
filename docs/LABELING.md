@@ -16,15 +16,15 @@ fairing uses a three-tier labeling system. All tiers write to the same `feedback
         │
         ▼
 \rate  (Tier 1 — Mandatory Daily Batch)
-  └─ _run_mandatory_rate()   label today's sample; rate-gate blocks next \r
+  └─ _run_rate()   label today's sample (random order); rate-gate blocks next \r
         │
         ▼
 \rate --ext  (Tier 2 — Extended Labeling)
-  └─ _run_extended_rate()    label all unlabeled from title_index; no time limit
+  └─ _run_ext_rate()    label all unlabeled from title_index; random order; no time limit
         │
         ▼
 \lb  (Tier 3 — Label Browser)
-  └─ _run_label_browser()    search + edit any labeled entry
+  └─ _edit_label_entry()    search + edit any labeled entry
 
 All three tiers → feedback.jsonl → maybe_auto_train()
 ```
@@ -66,7 +66,7 @@ Append-only training labels. On load, deduplicated by URL (latest entry wins).
 | `url` | string | Article URL (original, not normalized) |
 | `title` | string | Article title at time of labeling |
 | `source` | string | RSS source name |
-| `label` | int | `1` = relevant, `0` = not interested |
+| `label` | int | `1` = relevant, `-1` = not interested |
 | `label_index` | int | Monotonically increasing counter (used for decay weight) |
 | `date` | string | Beijing date of label (YYYY-MM-DD) |
 
@@ -104,17 +104,16 @@ sample = random.sample(pool, min(n, len(pool)))
 - `already_labeled` = set of URLs in `feedback.jsonl`.
 - Result written to `rate_pending.json` with `completed=false`.
 
-### Card Loop: `_run_mandatory_rate()`
+### Card Loop: `_run_rate()`
 
-Presents each article in `sample_urls` as a card. On each card, the following keys are accepted:
+Presents each article in `sample_urls` as a card (in random order). On each card, the following keys are accepted:
 
 | Key | Action |
 |-----|--------|
 | `+` | Label as relevant (label=1), advance |
-| `-` | Label as not interested (label=0), advance |
+| `-` | Label as not interested (label=-1), advance |
 | `n` | Skip — no label recorded, advance |
 | `o` | Open URL in system browser |
-| `r` | Deep-read: fetch full text, open in `$EDITOR` |
 | `d` | Send to payload queue (`payload_queue.json`) |
 | `p` | Go back to previous card |
 | `s` | Save progress and exit |
@@ -146,7 +145,7 @@ If either condition fails, the command is blocked with an explanation.
 
 ### Pool Construction
 
-All articles from `title_index.jsonl` that are not in `already_labeled`, sorted newest-first (by `date` field, then by order in file).
+All articles from `title_index.jsonl` that are not in `already_labeled`, presented in random order.
 
 No time-window limit — articles from any date are eligible.
 
@@ -232,11 +231,10 @@ Flow:
 
 | Key | Available in | Action |
 |-----|-------------|--------|
-| `+` | `\rate`, `\rate --ext` | Label relevant |
-| `-` | `\rate`, `\rate --ext` | Label not interested |
+| `+` | `\rate`, `\rate --ext` | Label relevant (label=1) |
+| `-` | `\rate`, `\rate --ext` | Label not interested (label=-1) |
 | `n` | `\rate`, `\rate --ext` | Skip (no label) |
 | `o` | `\rate`, `\rate --ext` | Open in browser |
-| `r` | `\rate`, `\rate --ext` | Deep-read in `$EDITOR` |
 | `d` | `\rate`, `\rate --ext` | Add to payload queue |
 | `p` | `\rate`, `\rate --ext` | Previous article |
 | `s` | `\rate`, `\rate --ext` | Save and exit |

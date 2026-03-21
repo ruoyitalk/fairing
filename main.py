@@ -67,7 +67,6 @@ _SHORTCUTS: dict[str, str] = {
     r"\rate": "rate",
     r"\ms":   "model_status",
     r"\bk":   "backup",
-    r"\rd":   "read",
     r"\rs":   "restore",
     r"\re":   "resend",
     r"\dl":   "remd",
@@ -621,7 +620,7 @@ def _prompt_choice(a: dict, idx: int, total: int,
             "  [green bold][ + ][/green bold] 改为有价值   "
             "[red bold][ - ][/red bold] 改为不感兴趣   "
             "[yellow][ n ][/yellow] 保持不变   "
-            "[dim][ o ][/dim] 浏览器   [dim][ r ][/dim] 详读   "
+            "[dim][ o ][/dim] 浏览器   "
             "[magenta][ d ][/magenta] 加入payload"
             + back_hint +
             "   [cyan][ s ][/cyan] 保存退出"
@@ -631,13 +630,13 @@ def _prompt_choice(a: dict, idx: int, total: int,
             "  [green bold][ + ][/green bold] 有价值   "
             "[red bold][ - ][/red bold] 不感兴趣   "
             "[yellow][ n ][/yellow] 跳过   "
-            "[dim][ o ][/dim] 浏览器   [dim][ r ][/dim] 详读   "
+            "[dim][ o ][/dim] 浏览器   "
             "[magenta][ d ][/magenta] 加入payload"
             + back_hint +
             "   [cyan][ s ][/cyan] 保存退出"
         )
-    valid = {"+", "-", "n", "s", "o", "r", "d"} | ({"p"} if can_go_back else set())
-    hint  = "+ / - / n / o / r / d" + (" / p" if can_go_back else "") + " / s"
+    valid = {"+", "-", "n", "s", "o", "d"} | ({"p"} if can_go_back else set())
+    hint  = "+ / - / n / o / d" + (" / p" if can_go_back else "") + " / s"
     while True:
         choice = input("  > ").strip().lower()
         if choice in valid:
@@ -645,23 +644,10 @@ def _prompt_choice(a: dict, idx: int, total: int,
                 import webbrowser
                 webbrowser.open(url)
                 continue
-            if choice == "r":
-                import os as _os
-                from fairing.reader import read_article, save_readnote
-                content = read_article(url, title=a.get("title", ""))
-                if content is not None:
-                    readnotes_raw = _os.environ.get("READNOTES_DIR", "")
-                    if readnotes_raw:
-                        rn_dir = Path(readnotes_raw).expanduser()
-                    else:
-                        from fairing.config import Config
-                        rn_dir = Path(Config().obsidian_dir) / "readnotes"
-                    save_readnote(url=url, title=a.get("title", ""),
-                                  content=content, source=a.get("source", ""),
-                                  readnotes_dir=rn_dir)
-                continue          # re-display same card after returning from editor
             if choice == "d":
-                _dispatch_to_payload(a, ask_label=True)
+                labeled = _dispatch_to_payload(a, ask_label=True)
+                if labeled:
+                    return "+"
                 continue
             return choice
         console.print(f"  [yellow]请输入 {hint}[/yellow]")
@@ -718,6 +704,7 @@ def _run_rate(pending: dict) -> None:
     all_urls  = pending.get("sample_urls", [])
     done_urls: set[str] = set(pending.get("done_urls", []))
     sample    = [dict(store[u]) for u in all_urls if u not in done_urls and u in store]
+    random.shuffle(sample)
 
     if not sample:
         console.print(Panel(
@@ -1051,7 +1038,7 @@ def _run_ext_rate() -> None:
             except (json.JSONDecodeError, KeyError):
                 continue
 
-    pool.sort(key=lambda e: e.get("date", ""), reverse=True)
+    random.shuffle(pool)
 
     if not pool:
         console.print(Panel(
@@ -1139,8 +1126,12 @@ def _run_ext_rate() -> None:
 
 # ── payload dispatch helper ───────────────────────────────────────────────────
 
-def _dispatch_to_payload(a: dict, ask_label: bool = True) -> None:
-    """Add article to payload queue with optional positive-label prompt."""
+def _dispatch_to_payload(a: dict, ask_label: bool = True) -> bool:
+    """Add article to payload queue with optional positive-label prompt.
+
+    Returns True if a positive label was newly saved (user confirmed "y"),
+    False in all other cases (skipped, already labeled, or ask_label=False).
+    """
     from fairing.export import add_to_payload_queue, article_id_for
     from fairing.trainer import load_feedback, save_feedback
 
@@ -1153,7 +1144,7 @@ def _dispatch_to_payload(a: dict, ask_label: bool = True) -> None:
         console.print(f"  [dim]已在 payload 队列中 [{aid}][/dim]")
 
     if not ask_label:
-        return
+        return False
 
     feedback    = load_feedback()
     existing    = next((f for f in feedback if f["url"] == url), None)
@@ -1162,7 +1153,7 @@ def _dispatch_to_payload(a: dict, ask_label: bool = True) -> None:
 
     if already_pos:
         console.print("  [dim]已标注为有价值[/dim]")
-        return
+        return False
 
     prompt = "  改为有价值？[y/n] " if already_neg else "  同时标注为有价值？[y/n] "
     if input(prompt).strip().lower() == "y":
@@ -1176,6 +1167,9 @@ def _dispatch_to_payload(a: dict, ask_label: bool = True) -> None:
             "date":        _today_beijing(),
         })
         console.print("  [green]✓ 已标注为有价值[/green]")
+        return True
+
+    return False
 
 
 # ── shortcuts ─────────────────────────────────────────────────────────────────
@@ -1196,7 +1190,6 @@ def _show_shortcuts() -> None:
         (r"\lb",   "labels",       "[英文关键词]",              "标注记录管理：搜索 · 翻页 · 修改"),
         ("",       "",             "",                          ""),
         (r"\ms",   "model_status", "",                          "分类器状态 · 训练进度 · 语义信号词"),
-        (r"\rd",   "read",         "[N] [--zh]",                "列出今日文章；N 按编号抓全文阅读；--zh 附中文摘要"),
         (r"\re",   "resend",       "",                          "重建今日文章列表并强制重发邮件"),
         (r"\dl",   "remd",         "[--no-md] [--no-notebook]", "重建今日文件（不发邮件，供从设备同步使用）"),
         ("",       "",             "",                          ""),
@@ -1578,13 +1571,13 @@ class Shell(cmd.Cmd):
                 t.add_column("#",    style="dim",      width=4)
                 t.add_column("标注", width=4)
                 t.add_column("ID",   style="dim cyan", width=18)
-                t.add_column("标题", style="cyan",     min_width=36)
+                t.add_column("标题", style="cyan",     min_width=36, no_wrap=False)
                 t.add_column("来源", width=16)
                 t.add_column("日期", width=12)
                 for i, f in enumerate(page_items, 1):
                     badge = "[green]+[/green]" if f["label"] == 1 else "[red]−[/red]"
                     aid   = article_id_for(f["url"])
-                    t.add_row(str(i), badge, aid, f.get("title", "")[:50],
+                    t.add_row(str(i), badge, aid, f.get("title", ""),
                               f.get("source", "")[:14], f.get("date", ""))
                 title_suffix = f"  [{query}]" if query else ""
                 console.print(Panel(
@@ -1639,18 +1632,18 @@ class Shell(cmd.Cmd):
         if not queue:
             console.print(Panel(
                 "payload 队列为空\n\n"
-                "[dim]在 [cyan]\\rate[/cyan] / [cyan]\\rd[/cyan] 中按 [magenta]d[/magenta] 加入文章，"
+                "[dim]在 [cyan]\\rate[/cyan] 中按 [magenta]d[/magenta] 加入文章，"
                 "或用 [cyan]\\ps <关键词>[/cyan] 搜索添加[/dim]",
                 border_style="dim",
             ))
             return
         t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
         t.add_column("ID",   style="dim cyan", width=18)
-        t.add_column("标题", style="cyan",     min_width=40)
+        t.add_column("标题", style="cyan",     min_width=40, no_wrap=False)
         t.add_column("来源", width=20)
         t.add_column("日期", width=12)
         for e in queue:
-            t.add_row(e["article_id"], e["title"][:60], e["source"][:20], e.get("queued_date", ""))
+            t.add_row(e["article_id"], e["title"], e["source"][:20], e.get("queued_date", ""))
         console.print(Panel(
             t,
             title=f"[bold]payload 队列  [{len(queue)} 篇][/bold]",
@@ -1659,62 +1652,91 @@ class Shell(cmd.Cmd):
         console.print("  [dim]使用 [cyan]payload clear[/cyan] 清空队列[/dim]")
 
     def do_psearch(self, line: str) -> None:
-        """Search all known articles by English title and add to payload queue.
+        """Browse and search all known articles, add selection to payload queue.
 
   Usage:
-    psearch <english keyword(s)>
+    psearch                  browse all articles (paginated, newest first)
+    psearch <keyword(s)>     filter by English title keywords (case-insensitive)
 
-  English titles only; case-insensitive; all keywords must appear in title."""
+  Navigation: n / p  page · <number(s)> select · q quit"""
         _clear()
         query = line.strip()
-        if not query:
-            console.print(Panel(
-                "[yellow]用法: psearch <英文关键词>[/yellow]\n"
-                "[dim]大小写不敏感 · 多个词均须出现在标题中 · 仅支持英文标题[/dim]",
-                border_style="yellow",
-            ))
-            return
         from fairing.export import search_by_title, add_to_payload_queue
         results = search_by_title(query)
         if not results:
-            console.print(Panel(
+            msg = (
                 f"[yellow]未找到英文标题含 \"{query}\" 的文章[/yellow]\n"
-                "[dim]搜索仅匹配英文标题，大小写不敏感，多个词均须出现[/dim]",
-                border_style="yellow",
-            ))
+                "[dim]大小写不敏感 · 多个词均须出现在标题中[/dim]"
+            ) if query else "[yellow]暂无文章记录[/yellow]"
+            console.print(Panel(msg, border_style="yellow"))
             return
-        shown = results[:30]
-        t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
-        t.add_column("#",    style="dim",      width=4)
-        t.add_column("ID",   style="dim cyan", width=18)
-        t.add_column("标题", style="cyan",     min_width=40)
-        t.add_column("来源", width=20)
-        for i, a in enumerate(shown, 1):
-            t.add_row(str(i), a["article_id"], a["title"][:60], a["source"][:20])
-        suffix = f"（显示前 30，共 {len(results)} 条）" if len(results) > 30 else ""
-        console.print(Panel(
-            t,
-            title=f"[bold]搜索结果: \"{query}\"  [{len(results)} 篇]{suffix}[/bold]",
-            border_style="blue",
-        ))
-        console.print("  输入编号选择文章（如 [cyan]1[/cyan] 或 [cyan]1 3 5[/cyan]），回车取消：", end="")
-        raw = input(" ").strip()
-        if not raw:
-            return
-        selected = []
-        for token in raw.split():
-            if token.isdigit():
-                idx = int(token) - 1
-                if 0 <= idx < len(shown):
-                    selected.append(shown[idx])
+
+        PAGE_SIZE   = 20
+        total_pages = max(1, (len(results) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page        = 0
+        selected: list[dict] = []
+
+        while True:
+            _clear()
+            start      = page * PAGE_SIZE
+            page_items = results[start:start + PAGE_SIZE]
+
+            t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
+            t.add_column("#",    style="dim",      width=4)
+            t.add_column("ID",   style="dim cyan", width=18)
+            t.add_column("标题", style="cyan",     min_width=36, no_wrap=False)
+            t.add_column("来源", width=18)
+            t.add_column("日期", width=12)
+            for i, a in enumerate(page_items, 1):
+                t.add_row(str(i), a["article_id"], a["title"],
+                          a["source"][:16], a.get("date", "")[:10])
+
+            panel_title = (f"搜索: \"{query}\"  " if query else "全部文章  ")
+            panel_title += f"[{len(results)} 篇]  第 {page + 1} / {total_pages} 页"
+            if selected:
+                panel_title += f"  · 已选 [green]{len(selected)}[/green] 篇"
+            console.print(Panel(t, title=f"[bold]{panel_title}[/bold]", border_style="blue"))
+
+            nav = []
+            if page < total_pages - 1: nav.append("[cyan]n[/cyan] 下一页")
+            if page > 0:               nav.append("[cyan]p[/cyan] 上一页")
+            nav.append("[cyan]<编号>[/cyan] 选择")
+            if selected:               nav.append("[cyan]y[/cyan] 确认加入队列")
+            nav.append("[cyan]q[/cyan] 退出")
+            console.print("  " + "  · ".join(nav))
+
+            raw = input("  > ").strip().lower()
+            if raw in ("q", ""):
+                return
+            if raw == "n":
+                if page < total_pages - 1:
+                    page += 1
+                continue
+            if raw == "p":
+                if page > 0:
+                    page -= 1
+                continue
+            if raw == "y" and selected:
+                break
+
+            # number selection
+            chosen = []
+            for token in raw.split():
+                if token.isdigit():
+                    idx = int(token) - 1
+                    if 0 <= idx < len(page_items):
+                        a = page_items[idx]
+                        if a not in selected:
+                            chosen.append(a)
+            if chosen:
+                selected.extend(chosen)
+                console.print(f"  [green]✓ 已选 {len(selected)} 篇[/green]（输入 [cyan]y[/cyan] 确认，或继续翻页选择）")
+                input("  [回车继续]")
+            else:
+                console.print("  [yellow]请输入页内编号 · n/p 翻页 · y 确认 · q 退出[/yellow]")
+                input("  [回车继续]")
+
         if not selected:
-            return
-        console.print(f"\n  已选择 [bold]{len(selected)}[/bold] 篇：")
-        for a in selected:
-            console.print(f"    [{a['article_id']}] [cyan]{a['title'][:55]}[/cyan]  [dim]{a['source']}[/dim]")
-        confirm = input("\n  确认加入 payload 队列？[y/n] ").strip().lower()
-        if confirm != "y":
-            console.print("  [dim]已取消[/dim]")
             return
         label_all = input("  同时将所有选中文章标注为有价值？[y/n] ").strip().lower() == "y"
         for a in selected:
@@ -1740,13 +1762,13 @@ class Shell(cmd.Cmd):
   Usage:
     send <article_id> [article_id2 ...]
 
-  article_id is the 16-char hex ID shown in \\rate, \\rd, and \\ps."""
+  article_id is the 16-char hex ID shown in \\rate and \\ps."""
         _clear()
         ids = line.split()
         if not ids:
             console.print(Panel(
                 "[yellow]用法: send <article_id> [article_id2 ...][/yellow]\n"
-                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\rd[/cyan]、[cyan]\\ps[/cyan] 中显示[/dim]",
+                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\ps[/cyan] 中显示[/dim]",
                 border_style="yellow",
             ))
             return
@@ -1871,102 +1893,6 @@ class Shell(cmd.Cmd):
         """Show model parameters, label statistics, and TF-IDF signals."""
         _clear()
         _show_model_status()
-
-    def do_read(self, line: str) -> None:
-        """Deep-read an article by index number from the last run.
-
-  Usage:
-    read            list today's articles with index numbers
-    read <N>        open article #N in $EDITOR and save readnote
-    read <N> --zh   same, with Chinese translation prepended"""
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
-        _clear()
-
-        # ── Load last-run article list ────────────────────────────────────────
-        if not LAST_RUN().exists():
-            console.print(Panel(
-                "还没有运行记录。先执行 [cyan]\\r[/cyan] 拉取文章。",
-                border_style="yellow",
-            ))
-            return
-        articles = json.loads(LAST_RUN().read_text(encoding="utf-8"))
-        if not articles:
-            console.print(Panel("上次运行没有文章。", border_style="yellow"))
-            return
-
-        args      = line.split()
-        translate = "--zh" in args
-        idx_args  = [a for a in args if not a.startswith("--")]
-
-        # ── No argument: show numbered list ───────────────────────────────────
-        if not idx_args:
-            from fairing.export import article_id_for, load_payload_queue
-            queued_ids = {e["article_id"] for e in load_payload_queue()}
-            t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
-            t.add_column("#",    style="dim",       width=4)
-            t.add_column("ID",   style="dim cyan",  width=18)
-            t.add_column("标题", style="cyan",      min_width=36)
-            t.add_column("来源", width=18)
-            t.add_column("分数", justify="right",   width=6)
-            for a in articles:
-                score_str = f"{a['score']:.2f}" if a.get("score") else "—"
-                aid       = article_id_for(a["url"])
-                id_cell   = f"[magenta]{aid}[/magenta]" if aid in queued_ids else aid
-                t.add_row(str(a["idx"]), id_cell, a["title"][:50], a["source"][:18], score_str)
-            console.print(Panel(t, title="[bold]上次运行文章列表[/bold]", border_style="blue"))
-            console.print(
-                "  [dim]使用 [cyan]read <N>[/cyan] 详读，[cyan]read <N> --zh[/cyan] 翻译后详读，"
-                "[magenta]send <ID>[/magenta] 加入 payload 队列[/dim]"
-            )
-            return
-
-        # ── Validate index ────────────────────────────────────────────────────
-        raw = idx_args[0]
-        if not raw.isdigit():
-            console.print(Panel(
-                f"[yellow]{raw!r} 不是有效编号[/yellow]\n"
-                f"直接输入 [cyan]read[/cyan] 查看文章列表",
-                border_style="yellow",
-            ))
-            return
-        n = int(raw)
-        matched = [a for a in articles if a["idx"] == n]
-        if not matched:
-            console.print(Panel(
-                f"[yellow]编号 {n} 不存在[/yellow]  有效范围：1 – {len(articles)}",
-                border_style="yellow",
-            ))
-            return
-        article = matched[0]
-        url     = article["url"]
-        title   = article["title"]
-        source  = article["source"]
-
-        # ── Fetch, display, save ──────────────────────────────────────────────
-        from fairing.reader import read_article, save_readnote
-        console.print(f"  [dim]抓取 #{n} {title[:60]} ...[/dim]")
-        content = read_article(url, title=title, translate=translate)
-
-        if content is not None:
-            # Determine readnotes dir: READNOTES_DIR env → OBSIDIAN_DIR/readnotes/
-            import os as _os
-            readnotes_raw = _os.environ.get("READNOTES_DIR", "")
-            if readnotes_raw:
-                readnotes_dir = Path(readnotes_raw).expanduser()
-            else:
-                from fairing.config import Config
-                readnotes_dir = Path(Config().obsidian_dir) / "readnotes"
-            note_path = save_readnote(
-                url=url, title=title, content=content,
-                source=source, readnotes_dir=readnotes_dir,
-                translated=translate,
-            )
-            console.print(Panel(
-                f"  文章   [cyan]#{n}[/cyan]  {title[:60]}\n"
-                f"  落盘   [dim]{note_path}[/dim]",
-                title="[bold green]详读完成[/bold green]", border_style="green",
-            ))
 
     def do_remd(self, _line: str) -> None:
         """Rebuild today's Obsidian/NotebookLM files without sending email.
