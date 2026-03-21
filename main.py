@@ -1288,8 +1288,8 @@ def _show_shortcuts() -> None:
     cmd_t.add_column("说明")
     _CMD_ROWS = [
         # shortcut    command           params                        description
-        (r"\r",    "run",          "[--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]",
-                                                               "拉取 RSS · 嵌入评分 · 写文件 · 发邮件  （参数默认值见下方）"),
+        (r"\r",    "run",          "[--no-md] [--no-mail] [--chinese] [--force]",
+                                                               "拉取 RSS · 嵌入评分 · 写摘要 · 发邮件  （参数默认值见下方）"),
         ("",       "",             "",                          ""),
         (r"\rate", "rate",         "[--ext]",                   "必需打标（未完成阻塞 \\r）；--ext 扩展全量未标文章新→旧"),
         (r"\lb",   "labels",       "[英文关键词]",              "标注记录管理：搜索 · 翻页 · 修改"),
@@ -1297,7 +1297,7 @@ def _show_shortcuts() -> None:
         (r"\ms",   "model_status", "",                          "分类器状态 · 训练历史 · 语义信号词"),
         (r"\slr",  "suspect",      "",                          "审查可疑标注（模型与判断分歧 >60%）"),
         (r"\re",   "resend",       "",                          "重建今日文章列表并强制重发邮件"),
-        (r"\dl",   "remd",         "[--no-md] [--no-notebook]", "重建今日文件（不发邮件，供从设备同步使用）"),
+        (r"\dl",   "remd",         "[--no-md]",                 "重建今日摘要文件（不发邮件，供从设备同步使用）"),
         ("",       "",             "",                          ""),
         (r"\t",    "toggle",       "<N>",                       "按编号开启 / 关闭 RSS 源"),
         (r"\c",    "config",       "",                          "所有 RSS 源 · 7 天文章量 · 距上次收录时长"),
@@ -1336,16 +1336,12 @@ def _show_shortcuts() -> None:
     args_t.add_column("当前默认",  width=20)
 
     # Output toggles (positive logic, both on by default)
-    args_t.add_row("--no-md",       "禁用 Obsidian 输出",                        _on(d["write_md"],       "RUN_MD"))
-    args_t.add_row("--no-notebook", "禁用 NotebookLM 输出",                      _on(d["write_notebook"], "RUN_NOTEBOOK"))
-    # Email modifiers
-    args_t.add_row("",              "",                                            "")
-    args_t.add_row("--no-mail",     "跳过发送邮件",                               _off(d["no_mail"],  "RUN_NO_MAIL"))
-    args_t.add_row("--chinese",     "邮件发中文（MD/NotebookLM 保持英文）",       _off(d["chinese"],  "RUN_CHINESE"))
+    args_t.add_row("--no-md",   "禁用摘要 MD 输出",       _on(d["write_md"],  "RUN_MD"))
+    args_t.add_row("",          "",                        "")
+    args_t.add_row("--no-mail", "跳过发送邮件",            _off(d["no_mail"],  "RUN_NO_MAIL"))
+    args_t.add_row("--chinese", "邮件发中文（MD 保持英文）", _off(d["chinese"], "RUN_CHINESE"))
 
-    console.print(Panel(args_t,
-                        title="[bold dim]run 参数  （--no-md 与 --no-notebook 不可同时使用）[/bold dim]",
-                        border_style="dim"))
+    console.print(Panel(args_t, title="[bold dim]run 参数[/bold dim]", border_style="dim"))
 
 
 # ── digest runner ─────────────────────────────────────────────────────────────
@@ -1353,15 +1349,14 @@ def _show_shortcuts() -> None:
 def _load_run_defaults() -> dict:
     """Read run parameter defaults from .env.
 
-    Output flags use positive (enable) logic and default to on:
-      RUN_MD        — write Obsidian vault output    (default: on; set 'false' to disable)
-      RUN_NOTEBOOK  — write NotebookLM source file   (default: on; set 'false' to disable)
+    Output flag (positive logic, default on):
+      RUN_MD      — write Markdown digest to NEWS_DIR  (set 'false' to disable)
 
-    Modifier flags default to off:
-      RUN_CHINESE   — email in Chinese
-      RUN_NO_MAIL   — skip email
+    Modifier flags (default off):
+      RUN_CHINESE — email in Chinese
+      RUN_NO_MAIL — skip email
 
-    CLI flags (--no-md, --no-notebook, --no-mail, etc.) always override .env defaults.
+    CLI flags always override .env defaults.
     """
     def _bool(key: str) -> bool:
         return os.environ.get(key, "").strip().lower() in ("1", "true", "yes")
@@ -1372,25 +1367,22 @@ def _load_run_defaults() -> dict:
         return val not in ("0", "false", "no")
 
     return {
-        "chinese":        _bool("RUN_CHINESE"),
-        "no_mail":        _bool("RUN_NO_MAIL"),
-        "write_md":       _bool_enabled("RUN_MD"),
-        "write_notebook": _bool_enabled("RUN_NOTEBOOK"),
+        "chinese":  _bool("RUN_CHINESE"),
+        "no_mail":  _bool("RUN_NO_MAIL"),
+        "write_md": _bool_enabled("RUN_MD"),
     }
 
 
 
 def run_digest(chinese: bool = False,
                no_mail: bool = False, force: bool = False,
-               write_md: bool = True, write_notebook: bool = True) -> None:
+               write_md: bool = True) -> None:
     """Fetch, score, and deliver the daily digest end-to-end.
 
-    @param chinese:        translate email to Chinese (MD and NotebookLM stay English)
-    @param no_mail:        skip sending the digest email
-    @param force:          bypass the rate-gate check (skip pending label warning)
-    @param write_md:       write Obsidian vault output (default True)
-    @param write_notebook: write NotebookLM source file (default True; also requires
-                           NEWS_DIR to be configured)
+    @param chinese:  translate email to Chinese (MD stays English)
+    @param no_mail:  skip sending the digest email
+    @param force:    bypass the rate-gate check (skip pending label warning)
+    @param write_md: write plain Markdown digest to NEWS_DIR (default True)
     """
     from dotenv import load_dotenv
     load_dotenv(override=True)
@@ -1406,7 +1398,7 @@ def run_digest(chinese: bool = False,
     from fairing.rss import fetch_rss
     from fairing.embedder import enrich, load_store
     from fairing.scorer import score_articles
-    from fairing.writer import write_obsidian, write_chinese, write_notebooklm, archive_vault
+    from fairing.writer import write_digest, write_chinese
     from fairing.mailer import send_digest
     from fairing.state import filter_unseen, mark_seen
 
@@ -1439,20 +1431,9 @@ def run_digest(chinese: bool = False,
         for i, a in enumerate(articles, 1)
     ], ensure_ascii=False, indent=2), encoding="utf-8")
 
-    moved = archive_vault(cfg.obsidian_dir)
-    if moved:
-        logger.info("Archived %d note(s) into week folders", moved)
-
-    # Write outputs. Both are on by default; each can be independently disabled.
-    if write_notebook and cfg.notebooklm_dir:
-        nlm = write_notebooklm(articles, cfg.notebooklm_dir)
-        logger.info("NotebookLM (EN) -> %s", nlm)
-    elif write_notebook and not cfg.notebooklm_dir:
-        logger.warning("NotebookLM requested but NEWS_DIR is not configured — skipped")
-
     if write_md:
-        path, count = write_obsidian(articles, cfg.obsidian_dir)
-        logger.info("Obsidian (EN)   -> %s  [+%d]", path, count)
+        path, count = write_digest(articles, cfg.news_dir)
+        logger.info("Digest (EN) -> %s  [+%d]", path, count)
 
     mark_seen(articles)
 
@@ -1516,7 +1497,7 @@ class Shell(cmd.Cmd):
         cfg = Config()
 
         data_note = f"  [dim]data  [/dim][green]✓[/green] [dim]{data_dir()}[/dim]"
-        news_dir  = Path(cfg.obsidian_dir) if cfg.obsidian_dir else None
+        news_dir  = Path(cfg.news_dir) if cfg.news_dir else None
         news_note = (
             f"  [dim]news  [/dim][green]✓[/green] [dim]{news_dir}[/dim]"
             if news_dir else
@@ -1540,35 +1521,22 @@ class Shell(cmd.Cmd):
     def do_run(self, line: str) -> None:
         """Run the daily digest.
 
-  Output (both enabled by default; disable per-run with --no-md / --no-notebook):
-    --no-md         skip Obsidian vault output for this run
-    --no-notebook   skip NotebookLM output for this run
-
-  Modifiers (combine freely):
+  Flags:
+    --no-md       skip writing Markdown digest to NEWS_DIR
     --no-mail     skip email notification
-    --chinese     email in Chinese (MD and NotebookLM stay English)
+    --chinese     email in Chinese (MD stays English)
     --force       bypass rate gate (emergency use)"""
         _clear()
         args          = line.split()
         defaults      = _load_run_defaults()
         chinese       = "--chinese"     in args or (defaults["chinese"] and "--no-chinese" not in args)
         no_mail       = "--no-mail"     in args or (defaults["no_mail"] and "--mail" not in args)
-        write_md       = defaults["write_md"]       and "--no-md"       not in args
-        write_notebook = defaults["write_notebook"] and "--no-notebook" not in args
-        force          = "--force" in args
-
-        if not write_md and not write_notebook:
-            console.print(Panel(
-                "[red]--no-md 和 --no-notebook 不能同时使用[/red]\n"
-                "两者都禁用会导致没有任何文件输出。",
-                border_style="red",
-            ))
-            return
+        write_md = defaults["write_md"] and "--no-md" not in args
+        force    = "--force" in args
 
         try:
-            run_digest(chinese=chinese,
-                       no_mail=no_mail, force=force,
-                       write_md=write_md, write_notebook=write_notebook)
+            run_digest(chinese=chinese, no_mail=no_mail,
+                       force=force, write_md=write_md)
         except Exception as exc:
             logger.error("Run failed: %s", exc)
 
@@ -2207,7 +2175,7 @@ class Shell(cmd.Cmd):
         from fairing.state import normalize_url as _norm, today_beijing
         from fairing.scorer import score_articles
         from fairing.config import Config
-        from fairing.writer import write_obsidian, write_notebooklm, archive_vault
+        from fairing.writer import write_digest
 
         if not SEEN_URLS().exists():
             console.print(Panel("还没有运行记录。先执行 [cyan]\\r[/cyan]。", border_style="yellow"))
@@ -2242,19 +2210,11 @@ class Shell(cmd.Cmd):
             return
 
         articles = score_articles(articles)
-        moved = archive_vault(cfg.obsidian_dir)
-
-        written = []
-        if cfg.notebooklm_dir:
-            nlm = write_notebooklm(articles, cfg.notebooklm_dir)
-            written.append(f"NotebookLM → {nlm}")
-        path, count = write_obsidian(articles, cfg.obsidian_dir)
-        written.append(f"Obsidian   → {path}  [+{count}]")
+        path, count = write_digest(articles, cfg.news_dir)
 
         console.print(Panel(
             f"  今日文章   [bold]{len(articles)}[/bold] 篇\n"
-            + "\n".join(f"  {w}" for w in written)
-            + (f"\n  归档       {moved} 个历史文件" if moved else ""),
+            f"  摘要       → {path}  [+{count}]",
             title="[bold green]文件已重建[/bold green]", border_style="green",
         ))
 
@@ -2478,15 +2438,10 @@ def main() -> None:
         defaults       = _load_run_defaults()
         chinese        = "--chinese"  in args or (defaults["chinese"] and "--no-chinese" not in args)
         no_mail        = "--no-mail"  in args or (defaults["no_mail"] and "--mail" not in args)
-        write_md       = defaults["write_md"]       and "--no-md"       not in args
-        write_notebook = defaults["write_notebook"] and "--no-notebook" not in args
-        force          = "--force" in args
-        if not write_md and not write_notebook:
-            console.print("[red]Error:[/red] --no-md and --no-notebook cannot both be set")
-            sys.exit(1)
-        run_digest(chinese=chinese,
-                   no_mail=no_mail, force=force,
-                   write_md=write_md, write_notebook=write_notebook)
+        write_md = defaults["write_md"] and "--no-md" not in args
+        force    = "--force" in args
+        run_digest(chinese=chinese, no_mail=no_mail,
+                   force=force, write_md=write_md)
         return
     Shell().cmdloop()
 

@@ -39,8 +39,7 @@ def _news_dir() -> pathlib.Path:
 
 @dataclass
 class Config:
-    obsidian_dir: str = field(default_factory=lambda: str(_news_dir()))
-    notebooklm_dir: str = field(default_factory=lambda: str(_news_dir() / "notebooklm"))
+    news_dir: str = field(default_factory=lambda: str(_news_dir()))
     rss_sources: list[RssSource] = field(default_factory=list)
 
     def __post_init__(self) -> None:
