@@ -129,7 +129,8 @@ def test_fetch_rss_allows_mostly_english():
 def test_fetch_rss_skips_failed_source():
     from fairing.rss import fetch_rss
     src = _source()
-    with patch("fairing.rss._fetch_with_retry") as mock_fetch:
+    with patch("fairing.rss._fetch_with_retry") as mock_fetch, \
+         patch("fairing.rss._record_feed_error"):
         mock_fetch.return_value = None   # simulates all retries failed
         articles = fetch_rss([src])
     assert articles == []
@@ -146,7 +147,8 @@ def test_fetch_rss_continues_after_failed_source():
             return None
         return _fake_feed([_fake_entry(title="Survived")])
 
-    with patch("fairing.rss._fetch_with_retry", side_effect=side_effect):
+    with patch("fairing.rss._fetch_with_retry", side_effect=side_effect), \
+         patch("fairing.rss._record_feed_error"):
         articles = fetch_rss([src_fail, src_ok])
     assert len(articles) == 1
     assert articles[0]["title"] == "Survived"
