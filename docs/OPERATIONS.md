@@ -88,6 +88,7 @@ Displays:
 - Label counts: total, positive, negative.
 - Progress toward `MIN_TOTAL=80`.
 - If deployed: balanced_accuracy from last training run, top signal words (TF-IDF proxy).
+- Training history: last 10 training attempts (date / samples / accuracy±std / C / deployed).
 
 ---
 
@@ -131,6 +132,8 @@ List all configured RSS sources with:
 - Index number.
 - Name and URL.
 - 7-day article count.
+- Label quality: positive labels / total labeled for this source (color-coded).
+- Time since last article.
 - Enable/disable status.
 
 ---
@@ -213,6 +216,28 @@ Browse or search all known articles for payload queuing. Without keywords, shows
 ```
 
 Look up an article by its 16-hex `article_id` and add it to `payload_queue.json`. Displays metadata for confirmation. Optionally label after queuing.
+
+---
+
+### `\fb` — Label an Article by ID
+
+```
+\fb <article_id>
+```
+
+Label a specific article as relevant (`+`) or not interested (`-`). Use after reading a full article via the payload consumer to record a high-quality judgment. Triggers `maybe_auto_train()` after saving.
+
+---
+
+### `\slr` — Suspicious Label Review
+
+```
+\slr
+```
+
+Shows articles where the model's prediction strongly disagrees with the saved label (disagreement > 60%). Sorted by disagreement magnitude. Allows re-labeling in place. Triggers `maybe_auto_train()` after any changes.
+
+Requires a deployed model (`\ms` to check status).
 
 ---
 

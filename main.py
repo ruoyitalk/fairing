@@ -1309,7 +1309,7 @@ def _show_shortcuts() -> None:
         (r"\pd",   "payload",      "[clear]",                   "查看全文下载队列；clear 清空"),
         (r"\ps",   "psearch",      "<英文关键词>",              "搜索文章并加入下载队列"),
         (r"\sd",   "send",         "<id> [id2 ...]",            "按 article_id（16 位）加入下载队列"),
-        (r"\fb",   "fb",           "<article_id>",              "补充阅读后标注（+/- label 写回训练池）"),
+        (r"\fb",   "fb",           "<article_id>",              "标注指定文章（+/- 有价值/不感兴趣）"),
         ("",       "",             "",                          ""),
         (r"\li",   "license",      "",                          "查看 MIT 许可证"),
         (r"\?  \h","shortcuts",    "",                          "显示本帮助"),

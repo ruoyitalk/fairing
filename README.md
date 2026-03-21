@@ -82,21 +82,23 @@ python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
 
 | Shortcut | Command | Params | Description |
 |----------|---------|--------|-------------|
-| `\r` | `run` | `[--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]` | Full pipeline: RSS → embed → score → write → email → backup |
+| `\r` | `run` | `[--no-mail] [--chinese] [--force]` | Full pipeline: RSS → embed → score → write digest → email → backup |
 | `\rate` | `rate` | `[--ext]` | Mandatory daily labeling sample; `--ext` extends to all unlabeled |
 | `\lb` | `label_browser` | `[keywords]` | Browse and edit labeled articles by keyword search |
-| `\ms` | `model_status` | | Classifier status, label counts, signal words |
+| `\ms` | `model_status` | | Classifier status, training history, signal words |
+| `\slr` | `suspect` | | Review labels where model disagrees (>60% divergence) |
 | `\re` | `resend` | | Rebuild today's article list and force-send email |
-| `\dl` | `remd` | | Rebuild Obsidian/NotebookLM files without email |
+| `\dl` | `remd` | | Rebuild digest file without email |
 | `\t` | `toggle` | `<N>` | Enable or disable RSS source by index |
-| `\c` | `config` | | List sources with 7-day article counts |
+| `\c` | `config` | | Sources with 7-day counts, label quality, last-seen time |
 | `\e` | `env` | `[set KEY VALUE]` | View or update `.env` variables |
 | `\l` | `log` | | Run history with per-source breakdown |
 | `\bk` | `backup` | | Manual backup trigger |
 | `\rs` | `restore` | | Restore from backup with diff + confirmation |
 | `\pd` | `payload_queue` | `[clear]` | View or clear payload queue |
-| `\ps` | `payload_search` | `<keywords>` | Search articles and add to payload queue |
+| `\ps` | `payload_search` | `[keywords]` | Browse all articles or filter by keyword; add to payload queue |
 | `\sd` | `send_by_id` | `<article_id>` | Add specific article to payload queue by ID |
+| `\fb` | `fb` | `<article_id>` | Label a specific article (+/-) |
 | `\li` | `list_index` | | List recent entries in title_index.jsonl |
 | `\?` `\h` | `shortcuts` | | Show command reference |
 | `\q` | `quit` | | Exit |

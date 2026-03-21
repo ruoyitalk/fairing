@@ -82,21 +82,23 @@ python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
 
 | 快捷键 | 命令 | 参数 | 说明 |
 |--------|------|------|------|
-| `\r` | `run` | `[--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]` | 完整流水线：RSS → 嵌入 → 评分 → 写文件 → 发邮件 → 备份 |
+| `\r` | `run` | `[--no-mail] [--chinese] [--force]` | 完整流水线：RSS → 嵌入 → 评分 → 写摘要 → 发邮件 → 备份 |
 | `\rate` | `rate` | `[--ext]` | 每日必需打标批次；`--ext` 扩展至所有未标文章 |
 | `\lb` | `label_browser` | `[关键词]` | 按关键词搜索并修改历史标注 |
-| `\ms` | `model_status` | | 分类器状态、标注统计、信号词 |
+| `\ms` | `model_status` | | 分类器状态、训练历史、信号词 |
+| `\slr` | `suspect` | | 审查可疑标注（模型与判断分歧 >60%） |
 | `\re` | `resend` | | 重建今日文章列表并强制重发邮件 |
-| `\dl` | `remd` | | 重建 Obsidian/NotebookLM 文件，不发邮件 |
+| `\dl` | `remd` | | 重建摘要文件，不发邮件 |
 | `\t` | `toggle` | `<N>` | 按编号启用或禁用 RSS 订阅源 |
-| `\c` | `config` | | 列出订阅源及 7 天文章数 |
+| `\c` | `config` | | 订阅源 · 7 天文章数 · 标注质量 · 上次时间 |
 | `\e` | `env` | `[set KEY VALUE]` | 查看或修改 `.env` 变量 |
 | `\l` | `log` | | 运行历史及每源文章数 |
 | `\bk` | `backup` | | 手动触发备份 |
 | `\rs` | `restore` | | 从备份恢复（展示差异，确认后执行） |
 | `\pd` | `payload_queue` | `[clear]` | 查看或清空 payload 队列 |
-| `\ps` | `payload_search` | `<关键词>` | 搜索文章并加入 payload 队列 |
+| `\ps` | `payload_search` | `[关键词]` | 浏览全部文章或按关键词过滤；加入 payload 队列 |
 | `\sd` | `send_by_id` | `<article_id>` | 按 ID 将指定文章加入 payload 队列 |
+| `\fb` | `fb` | `<article_id>` | 标注指定文章（+ 有价值 / - 不感兴趣） |
 | `\li` | `list_index` | | 查看 title_index.jsonl 最近条目 |
 | `\?` `\h` | `shortcuts` | | 显示命令速查表 |
 | `\q` | `quit` | | 退出 |
