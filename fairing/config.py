@@ -28,16 +28,19 @@ def _load_sources_yaml(path: pathlib.Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def _news_dir() -> pathlib.Path:
+    """Resolve NEWS_DIR: the root output directory for daily digests.
+
+    Falls back to ~/Documents/fairing-news when NEWS_DIR is not set.
+    """
+    raw = os.environ.get("NEWS_DIR", "").strip()
+    return pathlib.Path(raw).expanduser() if raw else pathlib.Path.home() / "Documents" / "fairing-news"
+
+
 @dataclass
 class Config:
-    obsidian_dir: str = field(default_factory=lambda: str(
-        pathlib.Path(os.environ["OBSIDIAN_DIR"]).expanduser() if os.environ.get("OBSIDIAN_DIR")
-        else pathlib.Path.home() / "Documents" / "fairing-vault"
-    ))
-    notebooklm_dir: str = field(default_factory=lambda: str(
-        pathlib.Path(os.environ["NOTEBOOKLM_DIR"]).expanduser() if os.environ.get("NOTEBOOKLM_DIR")
-        else ""
-    ))
+    obsidian_dir: str = field(default_factory=lambda: str(_news_dir()))
+    notebooklm_dir: str = field(default_factory=lambda: str(_news_dir() / "notebooklm"))
     rss_sources: list[RssSource] = field(default_factory=list)
 
     def __post_init__(self) -> None:

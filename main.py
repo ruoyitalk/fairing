@@ -1390,7 +1390,7 @@ def run_digest(chinese: bool = False,
     @param force:          bypass the rate-gate check (skip pending label warning)
     @param write_md:       write Obsidian vault output (default True)
     @param write_notebook: write NotebookLM source file (default True; also requires
-                           NOTEBOOKLM_DIR to be configured)
+                           NEWS_DIR to be configured)
     """
     from dotenv import load_dotenv
     load_dotenv(override=True)
@@ -1448,7 +1448,7 @@ def run_digest(chinese: bool = False,
         nlm = write_notebooklm(articles, cfg.notebooklm_dir)
         logger.info("NotebookLM (EN) -> %s", nlm)
     elif write_notebook and not cfg.notebooklm_dir:
-        logger.warning("NotebookLM requested but NOTEBOOKLM_DIR is not configured — skipped")
+        logger.warning("NotebookLM requested but NEWS_DIR is not configured — skipped")
 
     if write_md:
         path, count = write_obsidian(articles, cfg.obsidian_dir)
@@ -1516,11 +1516,11 @@ class Shell(cmd.Cmd):
         cfg = Config()
 
         data_note = f"  [dim]data  [/dim][green]✓[/green] [dim]{data_dir()}[/dim]"
-        doc_dir   = Path(cfg.obsidian_dir) if cfg.obsidian_dir else None
-        doc_note  = (
-            f"  [dim]docs  [/dim][green]✓[/green] [dim]{doc_dir}[/dim]"
-            if doc_dir else
-            f"  [dim]docs  [/dim][dim]— OBSIDIAN_DIR not set[/dim]"
+        news_dir  = Path(cfg.obsidian_dir) if cfg.obsidian_dir else None
+        news_note = (
+            f"  [dim]news  [/dim][green]✓[/green] [dim]{news_dir}[/dim]"
+            if news_dir else
+            f"  [dim]news  [/dim][dim]— NEWS_DIR not set[/dim]"
         )
 
         console.print(Panel(
@@ -1530,7 +1530,7 @@ class Shell(cmd.Cmd):
             f"  [dim]A daily feed aggregator · tech blogs, newsletters, research → clean digest[/dim]\n"
             f"\n"
             f"{data_note}\n"
-            f"{doc_note}\n"
+            f"{news_note}\n"
             f"\n"
             f"  [dim]v{__version__}  JiekerTime <zhangjunjie@apache.org>  MIT[/dim]\n\n"
             f"  [cyan]\\?[/cyan] [dim]shortcuts[/dim]   [cyan]\\li[/cyan] [dim]license[/dim]",
