@@ -176,16 +176,17 @@ def _load_search_pool() -> list[dict]:
 def search_by_title(query: str) -> list[dict]:
     """Search all known articles by English title (case-insensitive, all words must match).
 
-    @param query: space-separated keywords; all must appear in the title
+    When query is empty, returns all known articles sorted by date descending.
+
+    @param query: space-separated keywords; all must appear in title; empty = return all
     @return: list of matching article dicts sorted by date descending
     """
     words = query.lower().split()
-    if not words:
-        return []
-    matches = [
-        a for a in _load_search_pool()
-        if all(w in a.get("title", "").lower() for w in words)
-    ]
+    pool = _load_search_pool()
+    matches = (
+        pool if not words
+        else [a for a in pool if all(w in a.get("title", "").lower() for w in words)]
+    )
     matches.sort(key=lambda a: a.get("date", ""), reverse=True)
     return matches
 

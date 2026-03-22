@@ -33,14 +33,12 @@ from fairing.paths import (
     seen_urls_file     as _seen_urls_file,
     digest_hash_file   as _digest_hash_file,
     rate_pending_file  as _rate_pending_file,
-    last_run_file      as _last_run_file,
     last_run_time_file as _last_run_time_file,
 )
 
 def SEEN_URLS():    return _seen_urls_file()
 def DIGEST_HASH():  return _digest_hash_file()
 def RATE_PENDING(): return _rate_pending_file()
-def LAST_RUN():     return _last_run_file()
 
 from fairing import __version__
 
@@ -67,20 +65,22 @@ _SHORTCUTS: dict[str, str] = {
     r"\rate": "rate",
     r"\ms":   "model_status",
     r"\bk":   "backup",
-    r"\rd":   "read",
     r"\rs":   "restore",
     r"\re":   "resend",
-    r"\dl":   "remd",
+    r"\dl":   "rebuild",
     r"\c":    "config",
     r"\e":    "env",
     r"\l":    "log",
-    r"\h":    "shortcuts",
-    r"\?":    "shortcuts",
+    r"\h":    "help",
+    r"\?":    "help",
     r"\t":    "toggle",
     r"\lb":   "labels",
-    r"\pd":   "payload",
-    r"\ps":   "psearch",
-    r"\sd":   "send",
+    r"\pd":   "queue",
+    r"\ps":   "queue_search",
+    r"\sd":   "enqueue",
+    r"\fb":   "label",
+    r"\slr":  "label_review",
+    r"\im":   "import_csv",
     r"\li":   "license",
     r"\q":    "quit",
 }
@@ -167,22 +167,42 @@ def _mask(key: str, value: str) -> str:
 # ── rate-gate ─────────────────────────────────────────────────────────────────
 
 def _load_pending() -> dict:
-    if RATE_PENDING().exists():
-        return json.loads(RATE_PENDING().read_text(encoding="utf-8"))
-    return {}
+    if not RATE_PENDING().exists():
+        return {}
+    data = json.loads(RATE_PENDING().read_text(encoding="utf-8"))
+    # Migrate old format {sample_urls, done_urls} → new format {n, completed}
+    if "sample_urls" in data and "n" not in data:
+        sample = data.get("sample_urls", [])
+        done   = set(data.get("done_urls", []))
+        n      = max(len(sample), 3)
+        data   = {
+            "run_date":  data.get("run_date", _today_beijing()),
+            "n":         n,
+            "completed": data.get("completed", False) or len(done) >= n,
+        }
+        _save_pending(data)
+    return data
 
 
 def _save_pending(data: dict) -> None:
     RATE_PENDING().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _today_label_count() -> int:
+    """Count labels saved today (Beijing date) in feedback.jsonl."""
+    from fairing.trainer import load_feedback
+    today = _today_beijing()
+    return sum(1 for f in load_feedback()
+               if f.get("date") == today and f["label"] in (1, -1))
+
+
 def _check_rate_gate(force: bool = False) -> bool:
     pending = _load_pending()
     if pending and not pending.get("completed", True) and not force:
-        done      = len(pending.get("done_urls", []))
-        total     = len(pending.get("sample_urls", []))
+        n    = pending.get("n", 0)
+        done = _today_label_count()
         console.print(Panel(
-            f"[yellow]上次打标任务尚未完成[/yellow]  ({done}/{total} 篇)\n\n"
+            f"[yellow]今日打标任务尚未完成[/yellow]  ({done}/{n} 篇)\n\n"
             f"完成标注后才能拉取新文章，避免训练数据断档。\n"
             f"  · 继续标注：[cyan]\\rate[/cyan]\n"
             f"  · 强制跳过：[dim]run --force[/dim]（不推荐）",
@@ -244,6 +264,18 @@ def _show_sources() -> None:
     from datetime import timedelta
     from fairing.embedder import load_store
     from fairing.state import normalize_url as _norm
+    from fairing.trainer import load_feedback
+
+    # ── Build per-source label quality (positive ratio) ───────────────────────
+    src_pos:     dict[str, int] = {}
+    src_labeled: dict[str, int] = {}
+    for f in load_feedback():
+        src = f.get("source", "")
+        if not src:
+            continue
+        src_labeled[src] = src_labeled.get(src, 0) + 1
+        if f["label"] == 1:
+            src_pos[src] = src_pos.get(src, 0) + 1
 
     # ── Build per-source 7-day counts ─────────────────────────────────────────
     src_7d: dict[str, int] = {}
@@ -256,7 +288,7 @@ def _show_sources() -> None:
         for day, val in seen_data.items():
             if day < cutoff:
                 continue
-            for nu in (val.get("urls", val) if isinstance(val, dict) else val):
+            for nu in (val.get("urls", [])):
                 total_7d += 1
                 src = norm_to_src.get(nu, "")
                 if src:
@@ -310,6 +342,7 @@ def _show_sources() -> None:
         t.add_column("名称",  style="cyan", min_width=22)
         t.add_column("分类",  min_width=12)
         t.add_column("7天",   justify="right", width=5, style="cyan")
+        t.add_column("质量",  justify="right", width=8)
         t.add_column("上次",  justify="right", width=7)
         t.add_column("状态",  width=5)
         for i, s in enumerate(rss, 1):
@@ -317,6 +350,14 @@ def _show_sources() -> None:
             cnt     = str(src_7d.get(name, 0)) if src_7d.get(name) else "[dim]0[/dim]"
             enabled = name not in disabled_set and s.get("enabled", True)
             status  = "[green]开[/green]" if enabled else "[red]关[/red]"
+            total_lb = src_labeled.get(name, 0)
+            pos_lb   = src_pos.get(name, 0)
+            if total_lb > 0:
+                ratio     = pos_lb / total_lb
+                color     = "green" if ratio >= 0.5 else "yellow" if ratio >= 0.25 else "red"
+                qual_cell = f"[{color}]+{pos_lb}/{total_lb}[/{color}]"
+            else:
+                qual_cell = "[dim]—[/dim]"
             if name in src_last_h:
                 h = src_last_h[name]
                 if h < 1:
@@ -327,7 +368,7 @@ def _show_sources() -> None:
                     last_str = f"[yellow]{int(h // 24)}d[/yellow]"
             else:
                 last_str = "[dim]—[/dim]"
-            t.add_row(str(i), name, s.get("category", ""), cnt, last_str, status)
+            t.add_row(str(i), name, s.get("category", ""), cnt, qual_cell, last_str, status)
         console.print(Panel(t, title=f"[bold]{yaml_path.name}[/bold] [{color}]({label})[/{color}]",
                             border_style=color))
 
@@ -385,12 +426,12 @@ def _show_log() -> None:
     t.add_column("邮件",     width=6)
     for day in days:
         val   = data[day]
-        urls  = val.get("urls", val) if isinstance(val, dict) else val
+        urls  = val.get("urls", [])
         count = len(urls)
         sent  = "[green]✓[/green]" if day == email_date else "[dim]—[/dim]"
         t.add_row(day, str(count), sent)
     total = sum(
-        len(v.get("urls", v) if isinstance(v, dict) else v) for v in data.values()
+        len(v.get("urls", [])) for v in data.values()
     )
     console.print(Panel(
         t,
@@ -401,7 +442,7 @@ def _show_log() -> None:
     # ── 今日各源头明细 ────────────────────────────────────────────────────────
     if days:
         today_val  = data[days[0]]
-        today_urls = today_val.get("urls", today_val) if isinstance(today_val, dict) else today_val
+        today_urls = today_val.get("urls", [])
         src_counts: dict[str, int] = {}
         unknown    = 0
         for norm_url in today_urls:
@@ -516,6 +557,30 @@ def _show_model_status() -> None:
             sig_t.add_row("[red]−[/red]",   "  ".join(f"[red]{w}[/red]"   for w in top_neg))
         console.print(Panel(sig_t, title="[bold]语义信号[/bold]", border_style="dim"))
 
+    # Training history
+    from fairing.paths import training_log_file
+    log_path = training_log_file()
+    if log_path.exists():
+        rows = [json.loads(l) for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        rows = rows[-10:]   # most recent 10
+        if rows:
+            h = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
+            h.add_column("日期",   width=12)
+            h.add_column("样本",   justify="right", width=6)
+            h.add_column("+/-",    width=10)
+            h.add_column("准确率", justify="right", width=14)
+            h.add_column("C",      justify="right", width=8)
+            h.add_column("部署",   width=5)
+            for r in reversed(rows):
+                deploy_cell = "[green]✓[/green]" if r["deployed"] else "[red]✗[/red]"
+                acc_cell    = (f"[green]{r['cv_accuracy']:.2%}[/green]"
+                               if r["deployed"] else f"[yellow]{r['cv_accuracy']:.2%}[/yellow]")
+                acc_cell   += f" [dim]±{r['cv_std']:.2%}[/dim]"
+                h.add_row(r["date"], str(r["n_samples"]),
+                          f"[green]+{r['n_pos']}[/green]/[red]-{r['n_neg']}[/red]",
+                          acc_cell, f"{r['C']:.3f}", deploy_cell)
+            console.print(Panel(h, title="[bold]训练历史（最近 10 次）[/bold]", border_style="dim"))
+
 
 def MAX(a, b):  # tiny helper to avoid importing max ambiguity
     return a if a > b else b
@@ -523,29 +588,49 @@ def MAX(a, b):  # tiny helper to avoid importing max ambiguity
 
 # ── rate ──────────────────────────────────────────────────────────────────────
 
+def _build_unlabeled_pool(store: dict, feedback: list[dict]) -> list[dict]:
+    """Return all articles from title_index that have not yet been labeled.
+
+    Articles are returned in random order. Used by both _run_rate (mandatory)
+    and _run_ext_rate (extended) so the pool-building logic lives in one place.
+    """
+    from fairing.paths import title_index_file, scoring_store_file
+
+    labeled   = {f["url"] for f in feedback}
+    seen_aids: set[str] = set()
+    pool: list[dict]    = []
+
+    idx_file = title_index_file() if title_index_file().exists() else None
+    src      = idx_file or (scoring_store_file() if scoring_store_file().exists() else None)
+
+    if src:
+        use_idx = src == idx_file
+        for line in src.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                e   = json.loads(line)
+                url = e.get("url", "")
+                if use_idx:
+                    aid = e.get("article_id", "")
+                else:
+                    from fairing.export import article_id_for
+                    aid = article_id_for(url)
+                if not url or not aid or url in labeled or aid in seen_aids:
+                    continue
+                seen_aids.add(aid)
+                a = dict(e)
+                if url in store:
+                    a["text_for_scoring"] = store[url].get("text_for_scoring", "")
+                pool.append(a)
+            except (json.JSONDecodeError, KeyError):
+                continue
+
+    random.shuffle(pool)
+    return pool
+
 def _calc_sample_n(total: int) -> int:
     return min(8, max(3, total // 4))
-
-
-def _sample_articles(articles: list[dict]) -> list[dict]:
-    from fairing.trainer import load_feedback
-    rated = {f["url"] for f in load_feedback()}
-    pool  = [a for a in articles if a["url"] not in rated]
-    if not pool:
-        return []
-    n           = _calc_sample_n(len(articles))
-    pool_sorted = sorted(pool, key=lambda a: a.get("score", 0.5))
-    third       = max(1, len(pool_sorted) // 3)
-    low, mid, high = pool_sorted[:third], pool_sorted[third:2*third], pool_sorted[2*third:]
-    sample = (random.sample(high, min(2, len(high))) +
-              random.sample(mid,  min(3, len(mid)))  +
-              random.sample(low,  min(1, len(low))))
-    seen_src = {f.get("source") for f in load_feedback()}
-    new_src  = [a for a in pool if a["source"] not in seen_src
-                and a["url"] not in {s["url"] for s in sample}]
-    if new_src and len(sample) < n:
-        sample.append(random.choice(new_src))
-    return sample[:n]
 
 
 def _prompt_choice(a: dict, idx: int, total: int,
@@ -555,11 +640,13 @@ def _prompt_choice(a: dict, idx: int, total: int,
                    current_label: int | None = None,
                    can_go_back: bool = False,
                    daily_done: int = 0,
-                   daily_total: int = 0) -> str:
+                   daily_total: int = 0,
+                   nearby: tuple[list[str], list[str]] | None = None) -> str:
     """Display one article card, prompt for input, and return the choice.
 
     Valid returns: '+' '-' 'n' 's' 'o' (open URL) 'p' (previous, only if can_go_back).
     daily_done / daily_total: overall today's task progress (mandatory mode only).
+    nearby: (pos_titles, neg_titles) from _nearest_labels(); shown as score explanation.
     """
     _clear()
 
@@ -606,7 +693,18 @@ def _prompt_choice(a: dict, idx: int, total: int,
     preview   = text[:700]
     if len(text) > 700:
         preview += f"\n[dim]...（共 {len(text)} 字）[/dim]"
-    body = f"{meta_line}\n{url_line}\n\n{preview}" if url_line else f"{meta_line}\n\n{preview}"
+    explanation = ""
+    if nearby:
+        pos_nb, neg_nb = nearby
+        if pos_nb:
+            explanation += "\n[dim]▶ 相似有价值：[/dim]" + "  [dim]·[/dim]  ".join(
+                f"[dim green]{t}[/dim green]" for t in pos_nb)
+        if neg_nb:
+            explanation += "\n[dim]▷ 相似不感兴趣：[/dim]" + "  [dim]·[/dim]  ".join(
+                f"[dim red]{t}[/dim red]" for t in neg_nb)
+
+    body = (f"{meta_line}\n{url_line}\n\n{preview}{explanation}"
+            if url_line else f"{meta_line}\n\n{preview}{explanation}")
 
     panel_title = f"[dim][{idx}/{total}]"
     if mode_tag:
@@ -621,7 +719,7 @@ def _prompt_choice(a: dict, idx: int, total: int,
             "  [green bold][ + ][/green bold] 改为有价值   "
             "[red bold][ - ][/red bold] 改为不感兴趣   "
             "[yellow][ n ][/yellow] 保持不变   "
-            "[dim][ o ][/dim] 浏览器   [dim][ r ][/dim] 详读   "
+            "[dim][ o ][/dim] 浏览器   "
             "[magenta][ d ][/magenta] 加入payload"
             + back_hint +
             "   [cyan][ s ][/cyan] 保存退出"
@@ -631,13 +729,13 @@ def _prompt_choice(a: dict, idx: int, total: int,
             "  [green bold][ + ][/green bold] 有价值   "
             "[red bold][ - ][/red bold] 不感兴趣   "
             "[yellow][ n ][/yellow] 跳过   "
-            "[dim][ o ][/dim] 浏览器   [dim][ r ][/dim] 详读   "
+            "[dim][ o ][/dim] 浏览器   "
             "[magenta][ d ][/magenta] 加入payload"
             + back_hint +
             "   [cyan][ s ][/cyan] 保存退出"
         )
-    valid = {"+", "-", "n", "s", "o", "r", "d"} | ({"p"} if can_go_back else set())
-    hint  = "+ / - / n / o / r / d" + (" / p" if can_go_back else "") + " / s"
+    valid = {"+", "-", "n", "s", "o", "d"} | ({"p"} if can_go_back else set())
+    hint  = "+ / - / n / o / d" + (" / p" if can_go_back else "") + " / s"
     while True:
         choice = input("  > ").strip().lower()
         if choice in valid:
@@ -645,23 +743,10 @@ def _prompt_choice(a: dict, idx: int, total: int,
                 import webbrowser
                 webbrowser.open(url)
                 continue
-            if choice == "r":
-                import os as _os
-                from fairing.reader import read_article, save_readnote
-                content = read_article(url, title=a.get("title", ""))
-                if content is not None:
-                    readnotes_raw = _os.environ.get("READNOTES_DIR", "")
-                    if readnotes_raw:
-                        rn_dir = Path(readnotes_raw).expanduser()
-                    else:
-                        from fairing.config import Config
-                        rn_dir = Path(Config().obsidian_dir) / "readnotes"
-                    save_readnote(url=url, title=a.get("title", ""),
-                                  content=content, source=a.get("source", ""),
-                                  readnotes_dir=rn_dir)
-                continue          # re-display same card after returning from editor
             if choice == "d":
-                _dispatch_to_payload(a, ask_label=True)
+                labeled = _dispatch_to_payload(a, ask_label=True)
+                if labeled:
+                    return "+"
                 continue
             return choice
         console.print(f"  [yellow]请输入 {hint}[/yellow]")
@@ -704,138 +789,102 @@ def _show_train_result(result, pos_count: int, neg_count: int, total_hist: int) 
         ))
 
 
-def _run_rate(pending: dict) -> None:
-    """Mandatory rate mode: label today's sampled articles.
+def _nearest_labels(url: str, store: dict, feedback: list[dict],
+                    n: int = 2) -> tuple[list[str], list[str]]:
+    """Return titles of the n nearest positive and n nearest negative labeled articles.
 
-    Tracks cumulative daily progress so the card header shows how many
-    articles have been labeled across the entire day, including any
-    articles completed in a previous session (done_at_start).
+    Uses cosine similarity between the article's embedding and all labeled articles
+    whose embeddings are cached in the scoring store. Returns empty lists when the
+    model is not deployed or the article has no cached embedding.
+    """
+    if url not in store or "embedding" not in store[url]:
+        return [], []
+    import numpy as np
+    emb  = np.array(store[url]["embedding"], dtype=float)
+    norm = np.linalg.norm(emb)
+    if norm < 1e-9:
+        return [], []
+    emb_unit = emb / norm
+
+    pos_sims: list[tuple[float, str]] = []
+    neg_sims: list[tuple[float, str]] = []
+    for f in feedback:
+        furl = f.get("url", "")
+        if furl == url or furl not in store or "embedding" not in store[furl]:
+            continue
+        other      = np.array(store[furl]["embedding"], dtype=float)
+        other_norm = np.linalg.norm(other)
+        if other_norm < 1e-9:
+            continue
+        sim   = float(np.dot(emb_unit, other / other_norm))
+        title = f.get("title", "")
+        if f["label"] == 1:
+            pos_sims.append((sim, title))
+        elif f["label"] == -1:
+            neg_sims.append((sim, title))
+
+    top_pos = [t for _, t in sorted(pos_sims, reverse=True)[:n]]
+    top_neg = [t for _, t in sorted(neg_sims, reverse=True)[:n]]
+    return top_pos, top_neg
+
+
+def _run_rate(pending: dict) -> None:
+    """Mandatory rate mode: label n articles drawn from the full unlabeled pool.
+
+    n is set by \r based on today's article volume. Articles can be any unlabeled
+    entry — not just today's new articles. Progress is tracked by counting labels
+    saved today in feedback.jsonl, so \im and other labeling paths all count.
     """
     from fairing.trainer import load_feedback, save_feedback, maybe_auto_train
     from fairing.embedder import load_store
 
-    store     = load_store()
-    all_urls  = pending.get("sample_urls", [])
-    done_urls: set[str] = set(pending.get("done_urls", []))
-    sample    = [dict(store[u]) for u in all_urls if u not in done_urls and u in store]
+    n            = pending.get("n", 5)
+    already_done = _today_label_count()
+    remaining    = max(0, n - already_done)
 
-    if not sample:
+    if remaining == 0:
+        pending["completed"] = True
+        _save_pending(pending)
         console.print(Panel(
-            "当前没有待标注的文章。\n运行 [cyan]\\r[/cyan] 拉取新文章后再来。",
+            f"[green]今日 {n} 篇目标已全部完成[/green]",
+            border_style="green",
+        ))
+        return
+
+    store    = load_store()
+    feedback = load_feedback()
+    pool     = _build_unlabeled_pool(store, feedback)
+
+    if not pool:
+        console.print(Panel(
+            "没有未标注的文章可供展示。\n运行 [cyan]\\r[/cyan] 拉取新文章后再来。",
             border_style="yellow",
         ))
         return
 
-    feedback   = load_feedback()
     pos_count  = sum(1 for f in feedback if f["label"] ==  1)
     neg_count  = sum(1 for f in feedback if f["label"] == -1)
     total_hist = len(feedback)
     session_pos = session_neg = 0
     quit_early  = False
+    session_labeled = 0
     session_map: dict[str, int | None] = {}
 
-    done_at_start = len(done_urls)      # articles already done from previous sessions
-    daily_total   = len(all_urls)       # total today's sample size
-
     cursor = 0
-    while cursor < len(sample):
-        a          = sample[cursor]
-        daily_done = done_at_start + cursor   # cumulative progress this day
-        choice = _prompt_choice(a, cursor + 1, len(sample),
-                                session_pos, session_neg,
-                                pos_count, neg_count, total_hist,
-                                can_go_back=cursor > 0,
-                                daily_done=daily_done,
-                                daily_total=daily_total)
+    while cursor < len(pool) and session_labeled < remaining:
+        a = pool[cursor]
+        nb = _nearest_labels(a.get("url", ""), store, feedback) if "score" in a else None
+        choice = _prompt_choice(
+            a, already_done + session_labeled + 1, n,
+            session_pos, session_neg,
+            pos_count, neg_count, total_hist,
+            can_go_back=(cursor > 0),
+            daily_done=already_done + session_labeled,
+            daily_total=n,
+            nearby=nb,
+        )
         if choice == "s":
             quit_early = True
-            break
-
-        if choice == "p":
-            cursor -= 1
-            prev_url = sample[cursor]["url"]
-            done_urls.discard(prev_url)
-            if prev_url in session_map:
-                prev_label = session_map.pop(prev_url)
-                if prev_label is not None:
-                    pos_count   -= prev_label == 1
-                    neg_count   -= prev_label == -1
-                    session_pos -= prev_label == 1
-                    session_neg -= prev_label == -1
-                    total_hist  -= 1
-            continue
-
-        done_urls.add(a["url"])
-        if choice in ("+", "-"):
-            label = 1 if choice == "+" else -1
-            save_feedback({
-                "url":         a["url"],
-                "title":       a.get("title", ""),
-                "source":      a.get("source", ""),
-                "label":       label,
-                "label_index": total_hist,
-                "date":        _today_beijing(),
-            })
-            session_map[a["url"]] = label
-            pos_count   += label == 1
-            neg_count   += label == -1
-            session_pos += label == 1
-            session_neg += label == -1
-            total_hist  += 1
-        else:
-            session_map[a["url"]] = None
-        cursor += 1
-
-    pending["done_urls"] = list(done_urls)
-    pending["completed"] = not quit_early
-    _save_pending(pending)
-
-    _clear()
-    remaining     = len(all_urls) - len(done_urls)
-    session_total = session_pos + session_neg
-    if quit_early and remaining > 0:
-        console.print(Panel(
-            f"[yellow]进度已保存[/yellow]  —  可随时回来继续\n\n"
-            f"  本次标注   [green]+{session_pos}[/green] 有价值  /  [red]-{session_neg}[/red] 不感兴趣  =  {session_total} 篇\n"
-            f"  剩余待标   [bold]{remaining}[/bold] 篇\n\n"
-            f"[dim]下次执行 [cyan]\\rate[/cyan] 自动跳过已标文章继续[/dim]",
-            title="[yellow]任务暂停[/yellow]", border_style="yellow",
-        ))
-    else:
-        console.print(Panel(
-            f"[green]今日必需任务完成[/green]\n\n"
-            f"  本次标注   [green]+{session_pos}[/green] 有价值  /  [red]-{session_neg}[/red] 不感兴趣  =  {session_total} 篇",
-            title="[bold green]任务完成[/bold green]", border_style="green",
-        ))
-        store  = load_store()
-        result = maybe_auto_train(store)
-        _show_train_result(result, pos_count, neg_count, total_hist)
-
-
-def _run_extra_rate(extra_pool: list[dict]) -> None:
-    """Extra rate mode: label additional articles beyond the mandatory sample."""
-    from fairing.trainer import load_feedback, save_feedback, maybe_auto_train
-    from fairing.embedder import load_store
-
-    # Newest first
-    pool = sorted(extra_pool, key=lambda a: a.get("date", ""), reverse=True)
-
-    feedback    = load_feedback()
-    pos_count   = sum(1 for f in feedback if f["label"] ==  1)
-    neg_count   = sum(1 for f in feedback if f["label"] == -1)
-    total_hist  = len(feedback)
-    session_pos = session_neg = 0
-    total       = len(pool)
-    session_map: dict[str, int | None] = {}
-
-    cursor = 0
-    while cursor < total:
-        a      = pool[cursor]
-        choice = _prompt_choice(a, cursor + 1, total,
-                                session_pos, session_neg,
-                                pos_count, neg_count, total_hist,
-                                mode_tag="额外", can_go_back=cursor > 0)
-        if choice == "s":
             break
 
         if choice == "p":
@@ -844,11 +893,12 @@ def _run_extra_rate(extra_pool: list[dict]) -> None:
             if prev_url in session_map:
                 prev_label = session_map.pop(prev_url)
                 if prev_label is not None:
-                    pos_count   -= prev_label == 1
-                    neg_count   -= prev_label == -1
-                    session_pos -= prev_label == 1
-                    session_neg -= prev_label == -1
-                    total_hist  -= 1
+                    pos_count       -= prev_label == 1
+                    neg_count       -= prev_label == -1
+                    session_pos     -= prev_label == 1
+                    session_neg     -= prev_label == -1
+                    total_hist      -= 1
+                    session_labeled -= 1
             continue
 
         if choice in ("+", "-"):
@@ -861,24 +911,39 @@ def _run_extra_rate(extra_pool: list[dict]) -> None:
                 "label_index": total_hist,
                 "date":        _today_beijing(),
             })
+            feedback = load_feedback()
             session_map[a["url"]] = label
-            pos_count   += label == 1
-            neg_count   += label == -1
-            session_pos += label == 1
-            session_neg += label == -1
-            total_hist  += 1
+            pos_count       += label == 1
+            neg_count       += label == -1
+            session_pos     += label == 1
+            session_neg     += label == -1
+            total_hist      += 1
+            session_labeled += 1
         else:
             session_map[a["url"]] = None
         cursor += 1
 
-    session_total = session_pos + session_neg
+    done_today = already_done + session_labeled
+    if done_today >= n:
+        pending["completed"] = True
+    _save_pending(pending)
+
     _clear()
-    console.print(Panel(
-        f"  本次标注   [green]+{session_pos}[/green] 有价值  /  "
-        f"[red]-{session_neg}[/red] 不感兴趣  =  {session_total} 篇",
-        title="[bold cyan]额外打标完成[/bold cyan]", border_style="cyan",
-    ))
-    if session_total > 0:
+    session_total = session_pos + session_neg
+    if quit_early:
+        console.print(Panel(
+            f"[yellow]进度已保存[/yellow]  —  可随时回来继续\n\n"
+            f"  本次标注   [green]+{session_pos}[/green] 有价值  /  [red]-{session_neg}[/red] 不感兴趣  =  {session_total} 篇\n"
+            f"  今日剩余   [bold]{n - done_today}[/bold] / {n} 篇\n\n"
+            f"[dim]下次执行 [cyan]\\rate[/cyan] 继续，或 [cyan]\\im[/cyan] 批量导入[/dim]",
+            title="[yellow]任务暂停[/yellow]", border_style="yellow",
+        ))
+    else:
+        console.print(Panel(
+            f"[green]今日必需任务完成[/green]\n\n"
+            f"  本次标注   [green]+{session_pos}[/green] 有价值  /  [red]-{session_neg}[/red] 不感兴趣  =  {session_total} 篇",
+            title="[bold green]任务完成[/bold green]", border_style="green",
+        ))
         store  = load_store()
         result = maybe_auto_train(store)
         _show_train_result(result, pos_count, neg_count, total_hist)
@@ -1007,51 +1072,16 @@ def _edit_label_entry(entry: dict, store: dict) -> bool:
 # ── extended rate ─────────────────────────────────────────────────────────────
 
 def _run_ext_rate() -> None:
-    """Extended labeling: all unlabeled articles from title_index, newest first.
-    No quota, no rate-gate. User quits with 's'.
-    """
+    """Extended labeling: all unlabeled articles, no quota. User quits with 's'."""
     from fairing.trainer import load_feedback, save_feedback, maybe_auto_train
     from fairing.embedder import load_store
-    from fairing.paths import title_index_file, scoring_store_file
 
     feedback   = load_feedback()
-    labeled    = {f["url"] for f in feedback}
     pos_count  = sum(1 for f in feedback if f["label"] ==  1)
     neg_count  = sum(1 for f in feedback if f["label"] == -1)
     total_hist = len(feedback)
-
-    store = load_store()
-
-    seen_aids: set[str] = set()
-    pool: list[dict] = []
-
-    index_src = title_index_file() if title_index_file().exists() else None
-    fallback  = scoring_store_file() if not index_src and scoring_store_file().exists() else None
-    src_file  = index_src or fallback
-
-    if src_file:
-        for line in src_file.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                e   = json.loads(line)
-                url = e.get("url", "")
-                if index_src:
-                    aid = e.get("article_id", "")
-                else:
-                    from fairing.export import article_id_for
-                    aid = article_id_for(url)
-                if not url or not aid or url in labeled or aid in seen_aids:
-                    continue
-                seen_aids.add(aid)
-                a = dict(e)
-                if url in store:
-                    a["text_for_scoring"] = store[url].get("text_for_scoring", "")
-                pool.append(a)
-            except (json.JSONDecodeError, KeyError):
-                continue
-
-    pool.sort(key=lambda e: e.get("date", ""), reverse=True)
+    store      = load_store()
+    pool       = _build_unlabeled_pool(store, feedback)
 
     if not pool:
         console.print(Panel(
@@ -1061,7 +1091,7 @@ def _run_ext_rate() -> None:
         return
 
     console.print(Panel(
-        f"  待标注   [bold]{len(pool)}[/bold] 篇  （按时间从新到旧）\n"
+        f"  待标注   [bold]{len(pool)}[/bold] 篇  （随机顺序）\n"
         f"  历史     [green]+{pos_count}[/green] / [red]-{neg_count}[/red]  共 {total_hist} 条",
         title="[cyan]扩展打标[/cyan]", border_style="cyan",
     ))
@@ -1073,11 +1103,13 @@ def _run_ext_rate() -> None:
 
     while cursor < len(pool):
         a      = pool[cursor]
+        nb     = _nearest_labels(a.get("url", ""), store, feedback) if "score" in a else None
         choice = _prompt_choice(
             a, cursor + 1, len(pool),
             session_pos, session_neg,
             pos_count, neg_count, total_hist,
             can_go_back=(cursor > 0),
+            nearby=nb,
         )
         if choice == "s":
             quit_early = True
@@ -1139,8 +1171,12 @@ def _run_ext_rate() -> None:
 
 # ── payload dispatch helper ───────────────────────────────────────────────────
 
-def _dispatch_to_payload(a: dict, ask_label: bool = True) -> None:
-    """Add article to payload queue with optional positive-label prompt."""
+def _dispatch_to_payload(a: dict, ask_label: bool = True) -> bool:
+    """Add article to payload queue with optional positive-label prompt.
+
+    Returns True if a positive label was newly saved (user confirmed "y"),
+    False in all other cases (skipped, already labeled, or ask_label=False).
+    """
     from fairing.export import add_to_payload_queue, article_id_for
     from fairing.trainer import load_feedback, save_feedback
 
@@ -1153,7 +1189,7 @@ def _dispatch_to_payload(a: dict, ask_label: bool = True) -> None:
         console.print(f"  [dim]已在 payload 队列中 [{aid}][/dim]")
 
     if not ask_label:
-        return
+        return False
 
     feedback    = load_feedback()
     existing    = next((f for f in feedback if f["url"] == url), None)
@@ -1162,7 +1198,7 @@ def _dispatch_to_payload(a: dict, ask_label: bool = True) -> None:
 
     if already_pos:
         console.print("  [dim]已标注为有价值[/dim]")
-        return
+        return False
 
     prompt = "  改为有价值？[y/n] " if already_neg else "  同时标注为有价值？[y/n] "
     if input(prompt).strip().lower() == "y":
@@ -1176,6 +1212,9 @@ def _dispatch_to_payload(a: dict, ask_label: bool = True) -> None:
             "date":        _today_beijing(),
         })
         console.print("  [green]✓ 已标注为有价值[/green]")
+        return True
+
+    return False
 
 
 # ── shortcuts ─────────────────────────────────────────────────────────────────
@@ -1189,16 +1228,16 @@ def _show_shortcuts() -> None:
     cmd_t.add_column("说明")
     _CMD_ROWS = [
         # shortcut    command           params                        description
-        (r"\r",    "run",          "[--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]",
-                                                               "拉取 RSS · 嵌入评分 · 写文件 · 发邮件  （参数默认值见下方）"),
+        (r"\r",    "run",          "[--no-mail] [--chinese] [--force]",
+                                                               "拉取 RSS · 嵌入评分 · 写摘要 · 发邮件  （参数默认值见下方）"),
         ("",       "",             "",                          ""),
         (r"\rate", "rate",         "[--ext]",                   "必需打标（未完成阻塞 \\r）；--ext 扩展全量未标文章新→旧"),
         (r"\lb",   "labels",       "[英文关键词]",              "标注记录管理：搜索 · 翻页 · 修改"),
         ("",       "",             "",                          ""),
-        (r"\ms",   "model_status", "",                          "分类器状态 · 训练进度 · 语义信号词"),
-        (r"\rd",   "read",         "[N] [--zh]",                "列出今日文章；N 按编号抓全文阅读；--zh 附中文摘要"),
-        (r"\re",   "resend",       "",                          "重建今日文章列表并强制重发邮件"),
-        (r"\dl",   "remd",         "[--no-md] [--no-notebook]", "重建今日文件（不发邮件，供从设备同步使用）"),
+        (r"\ms",   "model_status", "",                          "分类器状态 · 训练历史 · 语义信号词"),
+        (r"\slr",  "label_review", "",                          "审查可疑标注（模型与判断分歧 >60%）"),
+        (r"\re",   "resend",       "[YYYY-MM-DD] [--zh]",       "重发邮件；可指定日期；重发邮件有显著标识"),
+        (r"\dl",   "rebuild",      "",                          "重建今日摘要文件（不发邮件，供从设备同步使用）"),
         ("",       "",             "",                          ""),
         (r"\t",    "toggle",       "<N>",                       "按编号开启 / 关闭 RSS 源"),
         (r"\c",    "config",       "",                          "所有 RSS 源 · 7 天文章量 · 距上次收录时长"),
@@ -1207,12 +1246,14 @@ def _show_shortcuts() -> None:
         (r"\bk",   "backup",       "",                          "手动触发数据备份"),
         (r"\rs",   "restore",      "",                          "从历史备份回档（差异对比 + 确认）"),
         ("",       "",             "",                          ""),
-        (r"\pd",   "payload",      "[clear]",                   "查看全文下载队列；clear 清空"),
-        (r"\ps",   "psearch",      "<英文关键词>",              "搜索文章并加入下载队列"),
-        (r"\sd",   "send",         "<id> [id2 ...]",            "按 article_id（16 位）加入下载队列"),
+        (r"\pd",   "queue",        "[clear]",                   "查看 payload 队列；clear 清空"),
+        (r"\ps",   "queue_search", "[英文关键词]",              "浏览全部文章或按关键词过滤；加入 payload 队列"),
+        (r"\sd",   "enqueue",      "<id> [id2 ...]",            "按 article_id 加入 payload 队列"),
+        (r"\fb",   "label",        "<article_id>",              "标注指定文章（+/- 有价值/不感兴趣）"),
+        (r"\im",   "import_csv",   "<file.csv>",                "批量打标 / 入队（CSV 格式）"),
         ("",       "",             "",                          ""),
         (r"\li",   "license",      "",                          "查看 MIT 许可证"),
-        (r"\?  \h","shortcuts",    "",                          "显示本帮助"),
+        (r"\?  \h","help",         "",                          "显示本帮助"),
         (r"\q",    "quit",         "",                          "退出"),
     ]
     for shortcut, command, params, desc in _CMD_ROWS:
@@ -1236,16 +1277,11 @@ def _show_shortcuts() -> None:
     args_t.add_column("当前默认",  width=20)
 
     # Output toggles (positive logic, both on by default)
-    args_t.add_row("--no-md",       "禁用 Obsidian 输出",                        _on(d["write_md"],       "RUN_MD"))
-    args_t.add_row("--no-notebook", "禁用 NotebookLM 输出",                      _on(d["write_notebook"], "RUN_NOTEBOOK"))
-    # Email modifiers
-    args_t.add_row("",              "",                                            "")
-    args_t.add_row("--no-mail",     "跳过发送邮件",                               _off(d["no_mail"],  "RUN_NO_MAIL"))
-    args_t.add_row("--chinese",     "邮件发中文（MD/NotebookLM 保持英文）",       _off(d["chinese"],  "RUN_CHINESE"))
+    args_t.add_row("",          "",                        "")
+    args_t.add_row("--no-mail", "跳过发送邮件",            _off(d["no_mail"],  "RUN_NO_MAIL"))
+    args_t.add_row("--chinese", "邮件发中文（MD 保持英文）", _off(d["chinese"], "RUN_CHINESE"))
 
-    console.print(Panel(args_t,
-                        title="[bold dim]run 参数  （--no-md 与 --no-notebook 不可同时使用）[/bold dim]",
-                        border_style="dim"))
+    console.print(Panel(args_t, title="[bold dim]run 参数[/bold dim]", border_style="dim"))
 
 
 # ── digest runner ─────────────────────────────────────────────────────────────
@@ -1253,15 +1289,11 @@ def _show_shortcuts() -> None:
 def _load_run_defaults() -> dict:
     """Read run parameter defaults from .env.
 
-    Output flags use positive (enable) logic and default to on:
-      RUN_MD        — write Obsidian vault output    (default: on; set 'false' to disable)
-      RUN_NOTEBOOK  — write NotebookLM source file   (default: on; set 'false' to disable)
+    Modifier flags (default off):
+      RUN_CHINESE — email in Chinese
+      RUN_NO_MAIL — skip email
 
-    Modifier flags default to off:
-      RUN_CHINESE   — email in Chinese
-      RUN_NO_MAIL   — skip email
-
-    CLI flags (--no-md, --no-notebook, --no-mail, etc.) always override .env defaults.
+    CLI flags always override .env defaults.
     """
     def _bool(key: str) -> bool:
         return os.environ.get(key, "").strip().lower() in ("1", "true", "yes")
@@ -1272,25 +1304,19 @@ def _load_run_defaults() -> dict:
         return val not in ("0", "false", "no")
 
     return {
-        "chinese":        _bool("RUN_CHINESE"),
-        "no_mail":        _bool("RUN_NO_MAIL"),
-        "write_md":       _bool_enabled("RUN_MD"),
-        "write_notebook": _bool_enabled("RUN_NOTEBOOK"),
+        "chinese": _bool("RUN_CHINESE"),
+        "no_mail": _bool("RUN_NO_MAIL"),
     }
 
 
 
 def run_digest(chinese: bool = False,
-               no_mail: bool = False, force: bool = False,
-               write_md: bool = True, write_notebook: bool = True) -> None:
+               no_mail: bool = False, force: bool = False) -> None:
     """Fetch, score, and deliver the daily digest end-to-end.
 
-    @param chinese:        translate email to Chinese (MD and NotebookLM stay English)
-    @param no_mail:        skip sending the digest email
-    @param force:          bypass the rate-gate check (skip pending label warning)
-    @param write_md:       write Obsidian vault output (default True)
-    @param write_notebook: write NotebookLM source file (default True; also requires
-                           NOTEBOOKLM_DIR to be configured)
+    @param chinese: translate email to Chinese (MD stays English)
+    @param no_mail: skip sending the digest email
+    @param force:   bypass the rate-gate check (skip pending label warning)
     """
     from dotenv import load_dotenv
     load_dotenv(override=True)
@@ -1306,7 +1332,7 @@ def run_digest(chinese: bool = False,
     from fairing.rss import fetch_rss
     from fairing.embedder import enrich, load_store
     from fairing.scorer import score_articles
-    from fairing.writer import write_obsidian, write_chinese, write_notebooklm, archive_vault
+    from fairing.writer import write_digest, write_chinese
     from fairing.mailer import send_digest
     from fairing.state import filter_unseen, mark_seen
 
@@ -1330,29 +1356,8 @@ def run_digest(chinese: bool = False,
     articles = enrich(articles)
     articles = score_articles(articles)
 
-    # Persist ordered article list for \rd command (score-sorted, same as email)
-    from fairing.export import article_id_for as _aid
-    LAST_RUN().write_text(json.dumps([
-        {"idx": i, "url": a["url"], "article_id": _aid(a["url"]),
-         "title": a.get("title", ""), "source": a.get("source", ""),
-         "published": a.get("published", ""), "score": round(a.get("score", 0.0), 4)}
-        for i, a in enumerate(articles, 1)
-    ], ensure_ascii=False, indent=2), encoding="utf-8")
-
-    moved = archive_vault(cfg.obsidian_dir)
-    if moved:
-        logger.info("Archived %d note(s) into week folders", moved)
-
-    # Write outputs. Both are on by default; each can be independently disabled.
-    if write_notebook and cfg.notebooklm_dir:
-        nlm = write_notebooklm(articles, cfg.notebooklm_dir)
-        logger.info("NotebookLM (EN) -> %s", nlm)
-    elif write_notebook and not cfg.notebooklm_dir:
-        logger.warning("NotebookLM requested but NOTEBOOKLM_DIR is not configured — skipped")
-
-    if write_md:
-        path, count = write_obsidian(articles, cfg.obsidian_dir)
-        logger.info("Obsidian (EN)   -> %s  [+%d]", path, count)
+    path, count = write_digest(articles, cfg.news_dir)
+    logger.info("Digest (EN) -> %s  [+%d]", path, count)
 
     mark_seen(articles)
 
@@ -1374,30 +1379,22 @@ def run_digest(chinese: bool = False,
                 email_articles = translate(copy.deepcopy(articles))
         send_digest(email_articles)
 
-    # Merge any remaining un-labeled URLs from a previous incomplete batch so
-    # that no selected article is silently dropped when \r runs a second time.
-    existing_pending = _load_pending()
-    prev_remaining: list[str] = []
-    if existing_pending and not existing_pending.get("completed", True):
-        done_set       = set(existing_pending.get("done_urls", []))
-        prev_remaining = [u for u in existing_pending.get("sample_urls", [])
-                         if u not in done_set]
-        if prev_remaining:
-            logger.info("Merging %d un-labeled URLs from previous pending batch",
-                        len(prev_remaining))
-
-    sample    = _sample_articles(articles)
-    new_urls  = [a["url"] for a in sample]
-    prev_set  = set(prev_remaining)
-    merged    = prev_remaining + [u for u in new_urls if u not in prev_set]
-
+    # Base n on today's cumulative article count (seen_urls already updated by mark_seen).
+    today_data  = json.loads(SEEN_URLS().read_text(encoding="utf-8")) if SEEN_URLS().exists() else {}
+    today_total = len(today_data.get(_today_beijing(), {}).get("urls", []))
+    n           = _calc_sample_n(max(today_total, len(articles)))
+    done_now    = _today_label_count()
+    completed   = done_now >= n
     _save_pending({
-        "run_date":    _today_beijing(),
-        "sample_urls": merged,
-        "completed":   False,
+        "run_date":  _today_beijing(),
+        "n":         n,
+        "completed": completed,
     })
-    logger.info("Rate sample ready: %d articles (%d merged from previous) — run \\rate to label",
-                len(merged), len(prev_remaining))
+    if completed:
+        logger.info("Rate task ready: today's %d labels already meet target %d", done_now, n)
+    else:
+        logger.info("Rate task ready: %d labels needed today (total seen: %d) — run \\rate to label",
+                    n, today_total)
 
     from fairing.backup import run_backup
     run_backup()
@@ -1411,11 +1408,26 @@ class Shell(cmd.Cmd):
 
     def preloop(self) -> None:
         _clear()
+        from fairing.paths import data_dir
+        from fairing.config import Config
+        cfg = Config()
+
+        data_note = f"  [dim]data  [/dim][green]✓[/green] [dim]{data_dir()}[/dim]"
+        news_dir  = Path(cfg.news_dir) if cfg.news_dir else None
+        news_note = (
+            f"  [dim]news  [/dim][green]✓[/green] [dim]{news_dir}[/dim]"
+            if news_dir else
+            f"  [dim]news  [/dim][dim]— NEWS_DIR not set[/dim]"
+        )
+
         console.print(Panel(
             f"[bold cyan]{LOGO}[/bold cyan]"
             f"\n"
             f"  [bold white]Wraps the noise, delivers the signal.[/bold white]\n"
             f"  [dim]A daily feed aggregator · tech blogs, newsletters, research → clean digest[/dim]\n"
+            f"\n"
+            f"{data_note}\n"
+            f"{news_note}\n"
             f"\n"
             f"  [dim]v{__version__}  JiekerTime <zhangjunjie@apache.org>  MIT[/dim]\n\n"
             f"  [cyan]\\?[/cyan] [dim]shortcuts[/dim]   [cyan]\\li[/cyan] [dim]license[/dim]",
@@ -1425,35 +1437,19 @@ class Shell(cmd.Cmd):
     def do_run(self, line: str) -> None:
         """Run the daily digest.
 
-  Output (both enabled by default; disable per-run with --no-md / --no-notebook):
-    --no-md         skip Obsidian vault output for this run
-    --no-notebook   skip NotebookLM output for this run
-
-  Modifiers (combine freely):
+  Flags:
     --no-mail     skip email notification
-    --chinese     email in Chinese (MD and NotebookLM stay English)
+    --chinese     email in Chinese (MD stays English)
     --force       bypass rate gate (emergency use)"""
         _clear()
         args          = line.split()
         defaults      = _load_run_defaults()
         chinese       = "--chinese"     in args or (defaults["chinese"] and "--no-chinese" not in args)
         no_mail       = "--no-mail"     in args or (defaults["no_mail"] and "--mail" not in args)
-        write_md       = defaults["write_md"]       and "--no-md"       not in args
-        write_notebook = defaults["write_notebook"] and "--no-notebook" not in args
-        force          = "--force" in args
-
-        if not write_md and not write_notebook:
-            console.print(Panel(
-                "[red]--no-md 和 --no-notebook 不能同时使用[/red]\n"
-                "两者都禁用会导致没有任何文件输出。",
-                border_style="red",
-            ))
-            return
+        force = "--force" in args
 
         try:
-            run_digest(chinese=chinese,
-                       no_mail=no_mail, force=force,
-                       write_md=write_md, write_notebook=write_notebook)
+            run_digest(chinese=chinese, no_mail=no_mail, force=force)
         except Exception as exc:
             logger.error("Run failed: %s", exc)
 
@@ -1476,14 +1472,19 @@ class Shell(cmd.Cmd):
                 ))
                 return
             if not pending.get("completed", False):
-                done  = len(pending.get("done_urls", []))
-                total = len(pending.get("sample_urls", []))
-                console.print(Panel(
-                    f"[yellow]今日必需打标尚未完成[/yellow]  ({done}/{total} 篇)\n\n"
-                    "请先执行 [cyan]\\rate[/cyan] 完成今日样本，再使用 [cyan]\\rate --ext[/cyan]。",
-                    title="[yellow]不可用[/yellow]", border_style="yellow",
-                ))
-                return
+                n    = pending.get("n", 0)
+                done = _today_label_count()
+                if done >= n:
+                    # Auto-complete: enough labels were saved via other paths (\im, \lb…)
+                    pending["completed"] = True
+                    _save_pending(pending)
+                else:
+                    console.print(Panel(
+                        f"[yellow]今日必需打标尚未完成[/yellow]  ({done}/{n} 篇)\n\n"
+                        "请先执行 [cyan]\\rate[/cyan] 完成今日目标，再使用 [cyan]\\rate --ext[/cyan]。",
+                        title="[yellow]不可用[/yellow]", border_style="yellow",
+                    ))
+                    return
             console.print(Panel(
                 "  来源：全量历史未打标文章（英文标题，大小写不敏感）\n"
                 "  排序：按发布时间从新到旧",
@@ -1514,13 +1515,11 @@ class Shell(cmd.Cmd):
                 title="[bold green]今日完成[/bold green]", border_style="green",
             ))
             return
-        done      = set(pending.get("done_urls", []))
-        total     = len(pending.get("sample_urls", []))
-        remaining = total - len(done)
-        if done:
+        n    = pending.get("n", 0)
+        done = _today_label_count()
+        if done > 0:
             console.print(Panel(
-                f"断点续标 — 继续未完成的今日样本\n\n"
-                f"  剩余   [bold]{remaining}[/bold] / {total} 篇",
+                f"继续今日目标 — 已完成 {done} / {n} 篇",
                 title="[dim]继续[/dim]", border_style="dim",
             ))
         _run_rate(pending)
@@ -1578,13 +1577,13 @@ class Shell(cmd.Cmd):
                 t.add_column("#",    style="dim",      width=4)
                 t.add_column("标注", width=4)
                 t.add_column("ID",   style="dim cyan", width=18)
-                t.add_column("标题", style="cyan",     min_width=36)
+                t.add_column("标题", style="cyan",     min_width=36, no_wrap=False)
                 t.add_column("来源", width=16)
                 t.add_column("日期", width=12)
                 for i, f in enumerate(page_items, 1):
                     badge = "[green]+[/green]" if f["label"] == 1 else "[red]−[/red]"
                     aid   = article_id_for(f["url"])
-                    t.add_row(str(i), badge, aid, f.get("title", "")[:50],
+                    t.add_row(str(i), badge, aid, f.get("title", ""),
                               f.get("source", "")[:14], f.get("date", ""))
                 title_suffix = f"  [{query}]" if query else ""
                 console.print(Panel(
@@ -1623,7 +1622,7 @@ class Shell(cmd.Cmd):
                         continue
                 console.print(f"  [yellow]请输入编号或 n / p / q[/yellow]")
 
-    def do_payload(self, line: str) -> None:
+    def do_queue(self, line: str) -> None:
         """Show or manage the payload download queue.
 
   Usage:
@@ -1639,18 +1638,18 @@ class Shell(cmd.Cmd):
         if not queue:
             console.print(Panel(
                 "payload 队列为空\n\n"
-                "[dim]在 [cyan]\\rate[/cyan] / [cyan]\\rd[/cyan] 中按 [magenta]d[/magenta] 加入文章，"
-                "或用 [cyan]\\ps <关键词>[/cyan] 搜索添加[/dim]",
+                "[dim]在 [cyan]\\rate[/cyan] 中按 [magenta]d[/magenta] 加入文章，"
+                "或用 [cyan]\\ps[/cyan] 搜索添加[/dim]",
                 border_style="dim",
             ))
             return
         t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
         t.add_column("ID",   style="dim cyan", width=18)
-        t.add_column("标题", style="cyan",     min_width=40)
+        t.add_column("标题", style="cyan",     min_width=40, no_wrap=False)
         t.add_column("来源", width=20)
         t.add_column("日期", width=12)
         for e in queue:
-            t.add_row(e["article_id"], e["title"][:60], e["source"][:20], e.get("queued_date", ""))
+            t.add_row(e["article_id"], e["title"], e["source"][:20], e.get("queued_date", ""))
         console.print(Panel(
             t,
             title=f"[bold]payload 队列  [{len(queue)} 篇][/bold]",
@@ -1658,63 +1657,92 @@ class Shell(cmd.Cmd):
         ))
         console.print("  [dim]使用 [cyan]payload clear[/cyan] 清空队列[/dim]")
 
-    def do_psearch(self, line: str) -> None:
-        """Search all known articles by English title and add to payload queue.
+    def do_queue_search(self, line: str) -> None:
+        """Browse and search all known articles, add selection to payload queue.
 
   Usage:
-    psearch <english keyword(s)>
+    queue_search             browse all articles (paginated, newest first)
+    queue_search <keyword(s)>  filter by English title keywords (case-insensitive)
 
-  English titles only; case-insensitive; all keywords must appear in title."""
+  Navigation: n / p  page · <number(s)> select · q quit"""
         _clear()
         query = line.strip()
-        if not query:
-            console.print(Panel(
-                "[yellow]用法: psearch <英文关键词>[/yellow]\n"
-                "[dim]大小写不敏感 · 多个词均须出现在标题中 · 仅支持英文标题[/dim]",
-                border_style="yellow",
-            ))
-            return
         from fairing.export import search_by_title, add_to_payload_queue
         results = search_by_title(query)
         if not results:
-            console.print(Panel(
+            msg = (
                 f"[yellow]未找到英文标题含 \"{query}\" 的文章[/yellow]\n"
-                "[dim]搜索仅匹配英文标题，大小写不敏感，多个词均须出现[/dim]",
-                border_style="yellow",
-            ))
+                "[dim]大小写不敏感 · 多个词均须出现在标题中[/dim]"
+            ) if query else "[yellow]暂无文章记录[/yellow]"
+            console.print(Panel(msg, border_style="yellow"))
             return
-        shown = results[:30]
-        t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
-        t.add_column("#",    style="dim",      width=4)
-        t.add_column("ID",   style="dim cyan", width=18)
-        t.add_column("标题", style="cyan",     min_width=40)
-        t.add_column("来源", width=20)
-        for i, a in enumerate(shown, 1):
-            t.add_row(str(i), a["article_id"], a["title"][:60], a["source"][:20])
-        suffix = f"（显示前 30，共 {len(results)} 条）" if len(results) > 30 else ""
-        console.print(Panel(
-            t,
-            title=f"[bold]搜索结果: \"{query}\"  [{len(results)} 篇]{suffix}[/bold]",
-            border_style="blue",
-        ))
-        console.print("  输入编号选择文章（如 [cyan]1[/cyan] 或 [cyan]1 3 5[/cyan]），回车取消：", end="")
-        raw = input(" ").strip()
-        if not raw:
-            return
-        selected = []
-        for token in raw.split():
-            if token.isdigit():
-                idx = int(token) - 1
-                if 0 <= idx < len(shown):
-                    selected.append(shown[idx])
+
+        PAGE_SIZE   = 20
+        total_pages = max(1, (len(results) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page        = 0
+        selected: list[dict] = []
+
+        while True:
+            _clear()
+            start      = page * PAGE_SIZE
+            page_items = results[start:start + PAGE_SIZE]
+
+            t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
+            t.add_column("#",    style="dim",      width=4)
+            t.add_column("ID",   style="dim cyan", width=18)
+            t.add_column("标题", style="cyan",     min_width=36, no_wrap=False)
+            t.add_column("来源", width=18)
+            t.add_column("日期", width=12)
+            for i, a in enumerate(page_items, 1):
+                t.add_row(str(i), a["article_id"], a["title"],
+                          a["source"][:16], a.get("date", "")[:10])
+
+            panel_title = (f"搜索: \"{query}\"  " if query else "全部文章  ")
+            panel_title += f"[{len(results)} 篇]  第 {page + 1} / {total_pages} 页"
+            if selected:
+                panel_title += f"  · 已选 [green]{len(selected)}[/green] 篇"
+            console.print(Panel(t, title=f"[bold]{panel_title}[/bold]", border_style="blue"))
+
+            nav = []
+            if page < total_pages - 1: nav.append("[cyan]n[/cyan] 下一页")
+            if page > 0:               nav.append("[cyan]p[/cyan] 上一页")
+            nav.append("[cyan]<编号>[/cyan] 选择")
+            if selected:               nav.append("[cyan]y[/cyan] 确认加入队列")
+            nav.append("[cyan]q[/cyan] 退出")
+            console.print("  " + "  · ".join(nav))
+
+            raw = input("  > ").strip().lower()
+            if raw in ("q", ""):
+                return
+            if raw == "n":
+                if page < total_pages - 1:
+                    page += 1
+                continue
+            if raw == "p":
+                if page > 0:
+                    page -= 1
+                continue
+            if raw == "y" and selected:
+                break
+
+            # number selection
+            chosen = []
+            for token in raw.split():
+                if token.isdigit():
+                    idx = int(token) - 1
+                    if 0 <= idx < len(page_items):
+                        a = page_items[idx]
+                        if a not in selected:
+                            chosen.append(a)
+            if chosen:
+                selected.extend(chosen)
+                console.print(f"  [green]✓ 已选 {len(selected)} 篇[/green]（输入 [cyan]y[/cyan] 确认，或继续翻页选择）")
+                input("  [回车继续]")
+            else:
+                console.print("  [yellow]请输入页内编号 · n/p 翻页 · y 确认 · q 退出[/yellow]")
+                input("  [回车继续]")
+
         if not selected:
-            return
-        console.print(f"\n  已选择 [bold]{len(selected)}[/bold] 篇：")
-        for a in selected:
-            console.print(f"    [{a['article_id']}] [cyan]{a['title'][:55]}[/cyan]  [dim]{a['source']}[/dim]")
-        confirm = input("\n  确认加入 payload 队列？[y/n] ").strip().lower()
-        if confirm != "y":
-            console.print("  [dim]已取消[/dim]")
             return
         label_all = input("  同时将所有选中文章标注为有价值？[y/n] ").strip().lower() == "y"
         for a in selected:
@@ -1734,19 +1762,19 @@ class Shell(cmd.Cmd):
                     })
                     console.print(f"  [green]✓ 已标注有价值:[/green] {a['title'][:50]}")
 
-    def do_send(self, line: str) -> None:
+    def do_enqueue(self, line: str) -> None:
         """Add article(s) to payload queue by article_id.
 
   Usage:
-    send <article_id> [article_id2 ...]
+    enqueue <article_id> [article_id2 ...]
 
-  article_id is the 16-char hex ID shown in \\rate, \\rd, and \\ps."""
+  article_id is the 16-char hex ID shown in \\rate and \\ps."""
         _clear()
         ids = line.split()
         if not ids:
             console.print(Panel(
-                "[yellow]用法: send <article_id> [article_id2 ...][/yellow]\n"
-                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\rd[/cyan]、[cyan]\\ps[/cyan] 中显示[/dim]",
+                "[yellow]用法: enqueue <article_id> [article_id2 ...][/yellow]\n"
+                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\ps[/cyan]、[cyan]\\li[/cyan] 中显示[/dim]",
                 border_style="yellow",
             ))
             return
@@ -1765,6 +1793,304 @@ class Shell(cmd.Cmd):
                 console.print("  [dim]已跳过[/dim]")
                 continue
             _dispatch_to_payload(a, ask_label=True)
+
+    def do_label(self, line: str) -> None:
+        """Label a specific article by article_id.
+
+  Usage:
+    label <article_id>
+
+  Use after reading a full article via the payload consumer to record
+  a high-quality judgment back into fairing's training pool."""
+        _clear()
+        aid = line.strip()
+        if not aid:
+            console.print(Panel(
+                "[yellow]用法: label <article_id>[/yellow]\n"
+                "[dim]article_id 在 [cyan]\\rate[/cyan]、[cyan]\\ps[/cyan]、[cyan]\\li[/cyan] 中显示[/dim]",
+                border_style="yellow",
+            ))
+            return
+        from fairing.export import find_by_id
+        a = find_by_id(aid)
+        if a is None:
+            console.print(Panel(f"[yellow]未找到 id={aid}[/yellow]", border_style="yellow"))
+            return
+
+        console.print(Panel(
+            f"  [bold cyan]{a['title']}[/bold cyan]\n"
+            f"  [dim]{a.get('source', '')}  {a.get('url', '')}[/dim]",
+            title="[bold]补充阅读后标注[/bold]", border_style="cyan",
+        ))
+        raw = input("  标注 [+] 有价值  [-] 不感兴趣  [n] 取消  > ").strip().lower()
+        if raw not in ("+", "-"):
+            console.print("  [dim]已取消[/dim]")
+            return
+
+        label = 1 if raw == "+" else -1
+        from fairing.trainer import load_feedback, save_feedback, maybe_auto_train
+        from fairing.embedder import load_store
+        feedback = load_feedback()
+        save_feedback({
+            "url":         a["url"],
+            "title":       a["title"],
+            "source":      a.get("source", ""),
+            "label":       label,
+            "label_index": len(feedback),
+            "date":        _today_beijing(),
+        })
+        label_str = "[green]有价值 +1[/green]" if label == 1 else "[red]不感兴趣 -1[/red]"
+        console.print(f"  ✓ 已标注为 {label_str}")
+        result = maybe_auto_train(load_store())
+        feedback_new = load_feedback()
+        pos = sum(1 for f in feedback_new if f["label"] ==  1)
+        neg = sum(1 for f in feedback_new if f["label"] == -1)
+        _show_train_result(result, pos, neg, len(feedback_new))
+
+    def do_import_csv(self, line: str) -> None:
+        """Batch label and/or enqueue articles from a CSV file.
+
+  Usage:
+    import_csv <file.csv>
+
+  CSV format — two columns, no header:
+    article_id,action
+
+  Actions:
+    +    label as valuable
+    -    label as not interested
+    q    add to payload queue (no label)
+    +q   label as valuable AND add to payload queue
+    -q   label as not interested AND add to payload queue
+    s    skip (record only, no operation)
+
+  Example:
+    5e07b775ab1f3af6,+q
+    a1b2c3d4e5f6a7b8,-
+    deadbeef00000001,q
+    cafebabe12345678,s"""
+        _clear()
+        import csv as _csv
+        path_str = line.strip()
+        if not path_str:
+            console.print(Panel(
+                "[yellow]用法: import_csv <file.csv>[/yellow]\n\n"
+                "[dim]CSV 格式：article_id,action\n"
+                "action：+ / - / q / +q / -q / s[/dim]",
+                border_style="yellow",
+            ))
+            return
+        path = Path(path_str).expanduser()
+        if not path.exists():
+            console.print(Panel(f"[yellow]文件不存在: {path}[/yellow]", border_style="yellow"))
+            return
+
+        from fairing.export import find_by_id, add_to_payload_queue
+        from fairing.trainer import load_feedback, save_feedback, maybe_auto_train
+        from fairing.embedder import load_store
+
+        VALID = {"+", "-", "q", "+q", "-q", "s"}
+        rows: list[tuple[str, str]] = []
+        try:
+            with path.open(encoding="utf-8") as f:
+                for r in _csv.reader(f):
+                    if not r or r[0].strip().startswith("#"):
+                        continue
+                    if len(r) < 2:
+                        continue
+                    rows.append((r[0].strip(), r[1].strip().lower()))
+        except Exception as exc:
+            console.print(Panel(f"[red]读取失败: {exc}[/red]", border_style="red"))
+            return
+
+        if not rows:
+            console.print(Panel("[yellow]CSV 文件无有效行[/yellow]", border_style="yellow"))
+            return
+
+        n_labeled = n_queued = n_skipped = n_not_found = n_invalid = 0
+        labeled_any = False
+        feedback = load_feedback()
+
+        for aid, action in rows:
+            if action not in VALID:
+                n_invalid += 1
+                continue
+            if action == "s":
+                n_skipped += 1
+                continue
+            article = find_by_id(aid)
+            if article is None:
+                n_not_found += 1
+                continue
+            if "+" in action or "-" in action:
+                label = 1 if "+" in action else -1
+                save_feedback({
+                    "url":         article["url"],
+                    "title":       article.get("title", ""),
+                    "source":      article.get("source", ""),
+                    "label":       label,
+                    "label_index": len(feedback),
+                    "date":        _today_beijing(),
+                })
+                feedback = load_feedback()
+                n_labeled += 1
+                labeled_any = True
+            if "q" in action:
+                add_to_payload_queue(article)
+                n_queued += 1
+
+        # Check if today's label count now meets the daily target.
+        n_synced = 0
+        if labeled_any:
+            pending = _load_pending()
+            if pending and not pending.get("completed", True):
+                if _today_label_count() >= pending.get("n", 0):
+                    pending["completed"] = True
+                    _save_pending(pending)
+                    n_synced = 1   # signal that task completed
+
+        lines = [
+            f"  总行数   [bold]{len(rows)}[/bold]",
+            f"  打标     [green]{n_labeled}[/green] 篇",
+            f"  入队     [magenta]{n_queued}[/magenta] 篇",
+            f"  跳过     [dim]{n_skipped}[/dim] 篇",
+        ]
+        if labeled_any and n_synced:
+            lines.append(f"  [cyan]今日任务已完成[/cyan]")
+        if n_not_found: lines.append(f"  未找到   [yellow]{n_not_found}[/yellow] 篇")
+        if n_invalid:   lines.append(f"  无效行   [red]{n_invalid}[/red] 行")
+        console.print(Panel("\n".join(lines), title="[bold green]批量导入完成[/bold green]",
+                            border_style="green"))
+
+        if labeled_any:
+            feedback = load_feedback()
+            pos = sum(1 for f in feedback if f["label"] ==  1)
+            neg = sum(1 for f in feedback if f["label"] == -1)
+            _show_train_result(maybe_auto_train(load_store()), pos, neg, len(feedback))
+
+    def do_label_review(self, _line: str) -> None:
+        """Review labels where the model strongly disagrees with your judgment.
+
+  Shows articles where model prediction conflicts with the saved label
+  (model score > 0.65 for a negative label, or < 0.35 for a positive label).
+  Sorted by disagreement magnitude. Allows re-labeling."""
+        _clear()
+        from fairing.trainer import load_model_and_scaler, load_feedback, save_feedback, maybe_auto_train
+        from fairing.embedder import load_store
+        import numpy as np
+
+        model, scaler = load_model_and_scaler()
+        if model is None:
+            console.print(Panel(
+                "[yellow]模型尚未部署，无法评估可疑标注[/yellow]\n"
+                "[dim]积累 80+ 标注后训练模型，再使用此功能[/dim]",
+                border_style="yellow",
+            ))
+            return
+
+        store    = load_store()
+        feedback = load_feedback()
+        classes  = model.classes_.tolist()
+        pos_idx  = classes.index(1) if 1 in classes else 1
+
+        suspects = []
+        for f in feedback:
+            url = f.get("url", "")
+            if url not in store or "embedding" not in store[url]:
+                continue
+            emb      = np.array([store[url]["embedding"]])
+            prob_pos = float(model.predict_proba(scaler.transform(emb))[0][pos_idx])
+            label    = f["label"]
+            disagreement = prob_pos if label == -1 else (1.0 - prob_pos)
+            if disagreement > 0.6:
+                suspects.append({**f, "_prob": prob_pos, "_dis": disagreement})
+
+        if not suspects:
+            console.print(Panel(
+                "[green]没有强烈分歧的标注[/green]\n[dim]模型与你的判断一致性良好[/dim]",
+                border_style="green",
+            ))
+            return
+
+        suspects.sort(key=lambda x: x["_dis"], reverse=True)
+        PAGE_SIZE   = 15
+        total_pages = max(1, (len(suspects) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page        = 0
+        changed     = 0
+
+        while True:
+            _clear()
+            start      = page * PAGE_SIZE
+            page_items = suspects[start:start + PAGE_SIZE]
+            t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
+            t.add_column("#",    style="dim",  width=4)
+            t.add_column("标题", style="cyan", min_width=40, no_wrap=False)
+            t.add_column("标注", width=8)
+            t.add_column("模型",  justify="right", width=8)
+            t.add_column("分歧",  justify="right", width=8)
+            for i, s in enumerate(page_items, 1):
+                label_cell = "[green]+1[/green]" if s["label"] == 1 else "[red]-1[/red]"
+                prob_cell  = f"{s['_prob']:.0%}"
+                dis_cell   = f"[yellow]{s['_dis']:.0%}[/yellow]"
+                t.add_row(str(i), s.get("title", ""), label_cell, prob_cell, dis_cell)
+            console.print(Panel(
+                t,
+                title=f"[bold]可疑标注  [{len(suspects)} 条]  第 {page+1}/{total_pages} 页[/bold]"
+                      + (f"  · 已修改 [green]{changed}[/green] 条" if changed else ""),
+                border_style="yellow",
+            ))
+            nav = []
+            if page < total_pages - 1: nav.append("[cyan]n[/cyan] 下一页")
+            if page > 0:               nav.append("[cyan]p[/cyan] 上一页")
+            nav.append("[cyan]<编号>[/cyan] 复审")
+            nav.append("[cyan]q[/cyan] 退出")
+            console.print("  " + "  · ".join(nav))
+
+            raw = input("  > ").strip().lower()
+            if raw in ("q", ""):
+                break
+            if raw == "n" and page < total_pages - 1:
+                page += 1; continue
+            if raw == "p" and page > 0:
+                page -= 1; continue
+            if raw.isdigit():
+                idx = int(raw) - 1
+                if 0 <= idx < len(page_items):
+                    entry  = page_items[idx]
+                    a_dict = dict(store.get(entry["url"], {}))
+                    a_dict.setdefault("url",   entry["url"])
+                    a_dict.setdefault("title", entry.get("title", ""))
+                    choice = _prompt_choice(
+                        a_dict, idx=1, total=1,
+                        session_pos=0, session_neg=0,
+                        pos_count=0, neg_count=0, total_hist=len(feedback),
+                        mode_tag="可疑复审", current_label=entry["label"],
+                        can_go_back=False,
+                    )
+                    if choice in ("+", "-"):
+                        new_label = 1 if choice == "+" else -1
+                        if new_label != entry["label"]:
+                            feedback = load_feedback()
+                            save_feedback({
+                                "url":         entry["url"],
+                                "title":       entry.get("title", ""),
+                                "source":      entry.get("source", ""),
+                                "label":       new_label,
+                                "label_index": len(feedback),
+                                "date":        _today_beijing(),
+                            })
+                            entry["label"] = new_label
+                            changed += 1
+            else:
+                console.print("  [yellow]请输入编号 · n/p 翻页 · q 退出[/yellow]")
+                input("  [回车继续]")
+
+        if changed:
+            result   = maybe_auto_train(load_store())
+            feedback = load_feedback()
+            pos = sum(1 for f in feedback if f["label"] ==  1)
+            neg = sum(1 for f in feedback if f["label"] == -1)
+            _show_train_result(result, pos, neg, len(feedback))
 
     def do_license(self, _line: str) -> None:
         """Show the MIT license."""
@@ -1872,107 +2198,11 @@ class Shell(cmd.Cmd):
         _clear()
         _show_model_status()
 
-    def do_read(self, line: str) -> None:
-        """Deep-read an article by index number from the last run.
-
-  Usage:
-    read            list today's articles with index numbers
-    read <N>        open article #N in $EDITOR and save readnote
-    read <N> --zh   same, with Chinese translation prepended"""
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
-        _clear()
-
-        # ── Load last-run article list ────────────────────────────────────────
-        if not LAST_RUN().exists():
-            console.print(Panel(
-                "还没有运行记录。先执行 [cyan]\\r[/cyan] 拉取文章。",
-                border_style="yellow",
-            ))
-            return
-        articles = json.loads(LAST_RUN().read_text(encoding="utf-8"))
-        if not articles:
-            console.print(Panel("上次运行没有文章。", border_style="yellow"))
-            return
-
-        args      = line.split()
-        translate = "--zh" in args
-        idx_args  = [a for a in args if not a.startswith("--")]
-
-        # ── No argument: show numbered list ───────────────────────────────────
-        if not idx_args:
-            from fairing.export import article_id_for, load_payload_queue
-            queued_ids = {e["article_id"] for e in load_payload_queue()}
-            t = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
-            t.add_column("#",    style="dim",       width=4)
-            t.add_column("ID",   style="dim cyan",  width=18)
-            t.add_column("标题", style="cyan",      min_width=36)
-            t.add_column("来源", width=18)
-            t.add_column("分数", justify="right",   width=6)
-            for a in articles:
-                score_str = f"{a['score']:.2f}" if a.get("score") else "—"
-                aid       = article_id_for(a["url"])
-                id_cell   = f"[magenta]{aid}[/magenta]" if aid in queued_ids else aid
-                t.add_row(str(a["idx"]), id_cell, a["title"][:50], a["source"][:18], score_str)
-            console.print(Panel(t, title="[bold]上次运行文章列表[/bold]", border_style="blue"))
-            console.print(
-                "  [dim]使用 [cyan]read <N>[/cyan] 详读，[cyan]read <N> --zh[/cyan] 翻译后详读，"
-                "[magenta]send <ID>[/magenta] 加入 payload 队列[/dim]"
-            )
-            return
-
-        # ── Validate index ────────────────────────────────────────────────────
-        raw = idx_args[0]
-        if not raw.isdigit():
-            console.print(Panel(
-                f"[yellow]{raw!r} 不是有效编号[/yellow]\n"
-                f"直接输入 [cyan]read[/cyan] 查看文章列表",
-                border_style="yellow",
-            ))
-            return
-        n = int(raw)
-        matched = [a for a in articles if a["idx"] == n]
-        if not matched:
-            console.print(Panel(
-                f"[yellow]编号 {n} 不存在[/yellow]  有效范围：1 – {len(articles)}",
-                border_style="yellow",
-            ))
-            return
-        article = matched[0]
-        url     = article["url"]
-        title   = article["title"]
-        source  = article["source"]
-
-        # ── Fetch, display, save ──────────────────────────────────────────────
-        from fairing.reader import read_article, save_readnote
-        console.print(f"  [dim]抓取 #{n} {title[:60]} ...[/dim]")
-        content = read_article(url, title=title, translate=translate)
-
-        if content is not None:
-            # Determine readnotes dir: READNOTES_DIR env → OBSIDIAN_DIR/readnotes/
-            import os as _os
-            readnotes_raw = _os.environ.get("READNOTES_DIR", "")
-            if readnotes_raw:
-                readnotes_dir = Path(readnotes_raw).expanduser()
-            else:
-                from fairing.config import Config
-                readnotes_dir = Path(Config().obsidian_dir) / "readnotes"
-            note_path = save_readnote(
-                url=url, title=title, content=content,
-                source=source, readnotes_dir=readnotes_dir,
-                translated=translate,
-            )
-            console.print(Panel(
-                f"  文章   [cyan]#{n}[/cyan]  {title[:60]}\n"
-                f"  落盘   [dim]{note_path}[/dim]",
-                title="[bold green]详读完成[/bold green]", border_style="green",
-            ))
-
-    def do_remd(self, _line: str) -> None:
-        """Rebuild today's Obsidian/NotebookLM files without sending email.
+    def do_rebuild(self, _line: str) -> None:
+        """Rebuild today's Markdown digest from cached data without sending email.
 
         Useful on secondary devices: pull the latest articles from the sync
-        directory and regenerate output files locally. No email is sent.
+        directory and regenerate the digest locally. No email is sent.
         """
         from dotenv import load_dotenv
         load_dotenv(override=True)
@@ -1982,7 +2212,7 @@ class Shell(cmd.Cmd):
         from fairing.state import normalize_url as _norm, today_beijing
         from fairing.scorer import score_articles
         from fairing.config import Config
-        from fairing.writer import write_obsidian, write_notebooklm, archive_vault
+        from fairing.writer import write_digest
 
         if not SEEN_URLS().exists():
             console.print(Panel("还没有运行记录。先执行 [cyan]\\r[/cyan]。", border_style="yellow"))
@@ -1991,7 +2221,7 @@ class Shell(cmd.Cmd):
         today     = today_beijing()
         seen_data = json.loads(SEEN_URLS().read_text(encoding="utf-8"))
         today_val = seen_data.get(today, {})
-        today_norms = set(today_val.get("urls", []) if isinstance(today_val, dict) else today_val)
+        today_norms = set(today_val.get("urls", []))
         if not today_norms:
             console.print(Panel(f"今日（{today}）暂无文章。", border_style="yellow"))
             return
@@ -2017,28 +2247,22 @@ class Shell(cmd.Cmd):
             return
 
         articles = score_articles(articles)
-        moved = archive_vault(cfg.obsidian_dir)
-
-        written = []
-        if cfg.notebooklm_dir:
-            nlm = write_notebooklm(articles, cfg.notebooklm_dir)
-            written.append(f"NotebookLM → {nlm}")
-        path, count = write_obsidian(articles, cfg.obsidian_dir)
-        written.append(f"Obsidian   → {path}  [+{count}]")
+        path, count = write_digest(articles, cfg.news_dir)
 
         console.print(Panel(
             f"  今日文章   [bold]{len(articles)}[/bold] 篇\n"
-            + "\n".join(f"  {w}" for w in written)
-            + (f"\n  归档       {moved} 个历史文件" if moved else ""),
+            f"  摘要       → {path}  [+{count}]",
             title="[bold green]文件已重建[/bold green]", border_style="green",
         ))
 
     def do_resend(self, line: str) -> None:
-        """Rebuild today's full article list from seen_urls + store and re-send email.
+        """Rebuild article list for a given date and re-send email.
 
   Usage:
-    resend          send consolidated digest of all today's articles
-    resend --zh     same, with Chinese translation"""
+    resend                  resend today's digest
+    resend YYYY-MM-DD       resend a specific date's digest
+    resend --zh             same, with Chinese translation
+    resend YYYY-MM-DD --zh  combine date and translation"""
         from dotenv import load_dotenv
         load_dotenv(override=True)
         _clear()
@@ -2048,27 +2272,32 @@ class Shell(cmd.Cmd):
         from fairing.scorer import score_articles
         from fairing.mailer import send_digest
         from fairing.config import Config
+        import re as _re
 
         if not SEEN_URLS().exists():
             console.print(Panel("还没有运行记录。先执行 [cyan]\\r[/cyan]。",
                                 border_style="yellow"))
             return
 
-        today     = today_beijing()
-        seen_data = json.loads(SEEN_URLS().read_text(encoding="utf-8"))
-        today_val = seen_data.get(today, {})
-        today_norms = set(today_val.get("urls", []) if isinstance(today_val, dict) else today_val)
-        if not today_norms:
-            console.print(Panel(f"今日（{today}）暂无文章。", border_style="yellow"))
+        args      = line.split()
+        translate = "--zh" in args
+        date_args = [a for a in args if _re.match(r"^\d{4}-\d{2}-\d{2}$", a)]
+        target    = date_args[0] if date_args else today_beijing()
+        is_today  = (target == today_beijing())
+
+        seen_data   = json.loads(SEEN_URLS().read_text(encoding="utf-8"))
+        target_val  = seen_data.get(target, {})
+        target_norms = set(target_val.get("urls", []))
+        if not target_norms:
+            console.print(Panel(f"[yellow]{target} 暂无文章记录[/yellow]", border_style="yellow"))
             return
 
-        # Rebuild article dicts from scoring_store
-        store    = load_store()
-        cfg      = Config()
-        src_cat  = {s.name: s.category for s in cfg.rss_sources}
+        store   = load_store()
+        cfg     = Config()
+        src_cat = {s.name: s.category for s in cfg.rss_sources}
         articles = []
         for url, entry in store.items():
-            if _norm(url) in today_norms:
+            if _norm(url) in target_norms:
                 articles.append({
                     "url":       url,
                     "title":     entry.get("title", ""),
@@ -2079,13 +2308,11 @@ class Shell(cmd.Cmd):
                     "embedding": entry.get("embedding"),
                 })
         if not articles:
-            console.print(Panel("无法从缓存重建今日文章。", border_style="yellow"))
+            console.print(Panel(f"无法从缓存重建 {target} 的文章。", border_style="yellow"))
             return
 
         articles = score_articles(articles)
 
-        args      = line.split()
-        translate = "--zh" in args
         email_articles = articles
         if translate:
             translator_key = os.environ.get("GEMINI_API_KEY", "")
@@ -2097,13 +2324,16 @@ class Shell(cmd.Cmd):
             else:
                 console.print("  [yellow]GEMINI_API_KEY 未配置，以英文发送[/yellow]")
 
+        is_resend = not is_today
         console.print(
-            f"  [dim]汇总今日文章 [bold]{len(articles)}[/bold] 篇，强制发送...[/dim]"
+            f"  [dim]{'重发' if is_resend else '汇总'} {target} 文章 "
+            f"[bold]{len(articles)}[/bold] 篇，强制发送...[/dim]"
         )
-        send_digest(email_articles, force=True)
+        send_digest(email_articles, force=True, resend=is_resend, date=target)
         console.print(Panel(
-            f"  今日文章   [bold]{len(articles)}[/bold] 篇\n"
-            f"  来自       {len({a['source'] for a in articles})} 个来源\n"
+            f"  日期       {target}{'  [yellow][重发][/yellow]' if is_resend else ''}\n"
+            f"  文章数     [bold]{len(articles)}[/bold] 篇\n"
+            f"  来源数     {len({a['source'] for a in articles})} 个\n"
             f"  翻译       {'中文' if translate else '英文（原文）'}",
             title="[bold green]邮件已发送[/bold green]", border_style="green",
         ))
@@ -2208,13 +2438,8 @@ class Shell(cmd.Cmd):
         else:
             console.print("[yellow]No data files found to back up.[/yellow]")
 
-    def do_shortcuts(self, _line: str) -> None:
-        r"""Show all shortcuts and key bindings (\r, \rate, \ms, \c, \e, \l, \h, \?, \q)."""
-        _clear()
-        _show_shortcuts()
-
     def do_help(self, _line: str) -> None:
-        """Show help (same as shortcuts)."""
+        r"""Show all shortcuts and key bindings (\r, \rate, \ms, \c, \e, \l, \h, \?, \q)."""
         _clear()
         _show_shortcuts()
 
@@ -2253,15 +2478,8 @@ def main() -> None:
         defaults       = _load_run_defaults()
         chinese        = "--chinese"  in args or (defaults["chinese"] and "--no-chinese" not in args)
         no_mail        = "--no-mail"  in args or (defaults["no_mail"] and "--mail" not in args)
-        write_md       = defaults["write_md"]       and "--no-md"       not in args
-        write_notebook = defaults["write_notebook"] and "--no-notebook" not in args
-        force          = "--force" in args
-        if not write_md and not write_notebook:
-            console.print("[red]Error:[/red] --no-md and --no-notebook cannot both be set")
-            sys.exit(1)
-        run_digest(chinese=chinese,
-                   no_mail=no_mail, force=force,
-                   write_md=write_md, write_notebook=write_notebook)
+        force = "--force" in args
+        run_digest(chinese=chinese, no_mail=no_mail, force=force)
         return
     Shell().cmdloop()
 

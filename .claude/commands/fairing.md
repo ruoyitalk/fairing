@@ -19,7 +19,7 @@ fairing/
   writer.py          — write_obsidian(), write_notebooklm(), archive_vault()
   translator.py      — Gemini-based EN→ZH translation (email only, training data stays EN)
   backup.py          — timestamped daily backups, diff_summary(), restore_backup()
-  reader.py          — deep-read: fetch full text (Firecrawl or requests), open in $EDITOR
+  reader.py          — URL type detection, browser open, fetch_full() for excerpt enrichment only
   export.py          — payload queue management: add, search, send_by_id, list
 data/
   feedback.jsonl     — append-only training labels (url, title, source, label, date)
@@ -38,7 +38,6 @@ All data file paths are resolved through `paths.py` helpers. Key functions:
 | `seen_urls_file()` | `DATA_DIR/seen_urls.json` |
 | `scoring_store_file()` | `DATA_DIR/scoring_store.jsonl` |
 | `rate_pending_file()` | `DATA_DIR/rate_pending.json` |
-| `last_run_articles_file()` | `DATA_DIR/last_run_articles.json` |
 | `title_index_file()` | `DATA_DIR/title_index.jsonl` |
 | `last_run_time_file()` | `DATA_DIR/last_run_time` |
 | `payload_queue_file()` | `DATA_DIR/payload_queue.json` |
@@ -54,9 +53,8 @@ All data file paths are resolved through `paths.py` helpers. Key functions:
 | `DATA_DIR/data/feedback.jsonl` | Training labels — most critical; not git-tracked (v1.0.0+) |
 | `DATA_DIR/seen_urls.json` | Dedup state, 30-day rolling window |
 | `DATA_DIR/scoring_store.jsonl` | Embedding cache (url→384-dim vector) |
-| `DATA_DIR/rate_pending.json` | Today's labeling sample + done_urls progress |
-| `DATA_DIR/title_index.jsonl` | All articles ever seen; pool for `\rate --ext` and `\lb` |
-| `DATA_DIR/last_run_articles.json` | Score-sorted article list for `\rd` command |
+| `DATA_DIR/rate_pending.json` | Today's labeling target `{run_date, n, completed}` |
+| `DATA_DIR/title_index.jsonl` | All articles ever seen; unlabeled pool for `\rate` and `\rate --ext` |
 | `DATA_DIR/last_run_time` | Timestamp of last `\r` run (for dynamic lookback) |
 | `DATA_DIR/payload_queue.json` | Queued article stubs for external payload consumer |
 | `DATA_DIR/feed_errors.json` | Feed fetch errors from last `\r` |
@@ -68,24 +66,26 @@ All data file paths are resolved through `paths.py` helpers. Key functions:
 
 | Shortcut | Command | Params | Description |
 |----------|---------|--------|-------------|
-| `\r` | `run` | `[--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]` | Full pipeline: RSS → embed → score → write → email → backup |
+| `\r` | `run` | `[--no-mail] [--chinese] [--force]` | Full pipeline: RSS → embed → score → write digest → email → backup |
 | `\rate` | `rate` | `[--ext]` | Mandatory daily labeling; `--ext` = all unlabeled from title_index |
-| `\lb` | `label_browser` | `[keywords]` | Browse and edit labeled articles; keyword search (AND, case-insensitive) |
-| `\ms` | `model_status` | | Classifier status, label counts, signal words |
-| `\rd` | `read` | `[N] [--zh]` | Deep-read article by index; list all if no N |
+| `\lb` | `labels` | `[keywords]` | Browse and edit labeled articles; keyword search (AND, case-insensitive) |
+| `\ms` | `model_status` | | Classifier status, training history, signal words |
+| `\slr` | `label_review` | | Review labels where model disagrees >60% |
 | `\re` | `resend` | | Rebuild today's full article list and force-send email |
-| `\dl` | `remd` | | Rebuild Obsidian/NotebookLM files without email |
+| `\dl` | `rebuild` | | Rebuild digest file without email (secondary device sync) |
 | `\t` | `toggle` | `<N>` | Enable/disable an RSS source by index |
-| `\c` | `config` | | List sources with 7-day article counts and enable/disable status |
-| `\e` | `env` | `[set KEY VALUE]` | View/edit .env; shows run-behavior defaults (RUN_*) |
+| `\c` | `config` | | Sources with 7-day counts, label quality, last-seen time |
+| `\e` | `env` | `[set KEY VALUE]` | View/edit .env |
 | `\l` | `log` | | Run history with today's per-source breakdown |
 | `\bk` | `backup` | | Manual backup trigger |
 | `\rs` | `restore` | | Restore from backup with diff + confirmation |
-| `\pd` | `payload_queue` | `[clear]` | View or clear payload_queue.json |
-| `\ps` | `payload_search` | `<keywords>` | Search articles by title, batch-add to payload queue |
-| `\sd` | `send_by_id` | `<article_id>` | Add specific article to payload queue by 16-hex ID |
-| `\li` | `list_index` | | List recent entries in title_index.jsonl |
-| `\?` `\h` | `shortcuts` | | Show command reference |
+| `\pd` | `queue` | `[clear]` | View or clear payload_queue.json |
+| `\ps` | `queue_search` | `[keywords]` | Browse all articles or filter by title; paginated; batch-add to payload queue |
+| `\sd` | `enqueue` | `<article_id>` | Add specific article to payload queue by 16-hex ID |
+| `\fb` | `label` | `<article_id>` | Label a specific article (+/-) |
+| `\im` | `import_csv` | `<file.csv>` | Batch label/enqueue from CSV (actions: +/-/q/+q/-q/s) |
+| `\li` | `license` | | Show MIT license |
+| `\?` `\h` | `help` | | Show command reference |
 | `\q` | `quit` | | Exit |
 
 ## Labeling Flow
@@ -96,24 +96,24 @@ All data file paths are resolved through `paths.py` helpers. Key functions:
   → filter_unseen (normalize URL + title)
   → enrich (embed → scoring_store.jsonl; update title_index.jsonl)
   → score_articles (LogisticRegressionCV or heuristic)
-  → save last_run_articles.json
-  → write_notebooklm / write_obsidian (per mode flags)
+  → write_digest (NEWS_DIR/YYYY-WXX/YYYY-MM-DD.md)
   → mark_seen (seen_urls.json)
   → send_digest (MAIL_SPLIT_N support)
-  → _save_pending (sample 3–8 articles → rate_pending.json)
+  → _save_pending ({run_date, n, completed} → rate_pending.json)
   → run_backup
 
 Three-tier labeling system:
 
 \rate  (Tier 1 — Mandatory Daily Batch)
-  → _run_mandatory_rate(): label today's sample_urls
+  → _run_rate(): draw n articles from full unlabeled pool (title_index.jsonl)
+  → progress = today's label count in feedback.jsonl (live, any path counts)
   → rate-gate: blocks next \r until completed=true
-  keys: + / - / n / o / r / d / p / s
+  keys: + / - / n / o / d / p / s   (d → dispatches to payload queue)
 
 \rate --ext  (Tier 2 — Extended Labeling)
-  → prerequisite: rate_pending.completed == true
-  → pool: all unlabeled from title_index.jsonl, newest-first, no time limit
-  → same card interface as Tier 1
+  → prerequisite: rate_pending.completed == true (auto-checked live)
+  → pool: all unlabeled from title_index.jsonl, random order, no time limit
+  → same card interface and pool logic as Tier 1 (_build_unlabeled_pool)
 
 \lb [keywords]  (Tier 3 — Label Browser)
   → search: feedback.jsonl, case-insensitive AND, PAGE_SIZE=20
@@ -163,8 +163,7 @@ When updating docs, maintain both English and Chinese versions:
 - `article_id = sha256(normalize_url(url))[:16]` — stable 16-hex identifier
 - Dynamic lookback: `effective_window = max(25, hours_since_last_run)`; first run uses 2026-03-20 epoch
 - Backups go to `BACKUP_DIR` (default `~/Documents/fairing/data_bak`), 7-day retention
-- Readnotes go to `READNOTES_DIR` (default `$OBSIDIAN_DIR/readnotes/`)
-- Training data always reflects English content; `--chinese` translates only the email copy
+n- Training data always reflects English content; `--chinese` translates only the email copy
 - `payload_queue.json` stores article stubs; consumer is responsible for full fetch and state
 
 ## Development Workflow (mandatory for every change)
@@ -172,7 +171,7 @@ When updating docs, maintain both English and Chinese versions:
 Every code change — no matter how small — must be accompanied by:
 
 1. **Tests**: add or update tests in `tests/test_<module>.py` covering the changed behaviour.
-   Run `python -m pytest tests/ -v` and ensure **all 126+ tests pass** before committing.
+   Run `python -m pytest tests/ -v` and ensure **all 130+ tests pass** before committing.
 2. **Docstrings / comments**: update the affected function/module docstrings in English.
 3. **Skills file**: update this file (`/.claude/commands/fairing.md`) if commands, flags,
    data files, or workflows change.
@@ -194,3 +193,4 @@ Every code change — no matter how small — must be accompanied by:
 - To retrain model: delete `personal_model.pkl` and `personal_scaler.pkl` from `DATA_DIR`, then `\rate`
 - `\li` helps find article_id values for `\sd`
 - `\pd clear` is the only supported way to reset the payload queue from within fairing
+- Full-text reading is the payload consumer's responsibility; fairing only opens the browser (`o` key)

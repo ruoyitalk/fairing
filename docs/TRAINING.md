@@ -259,17 +259,25 @@ Returning to an old topic needs only a few new positive samples to override deca
 
 ## Sampling Strategy for \rate
 
-The mandatory daily batch uses **simple random sampling** from today's new unlabeled articles:
+The mandatory daily batch uses **score-stratified random sampling** to ensure the label pool
+covers the full quality spectrum rather than clustering around a single score range:
 
 ```python
-n    = min(8, max(3, len(articles) // 4))   # 3–8 articles, proportional to daily count
-pool = [a for a in articles if a["url"] not in already_labeled]
-sample = random.sample(pool, min(n, len(pool)))
+n           = min(8, max(3, len(articles) // 4))   # 3–8 articles, proportional to daily count
+pool_sorted = sorted(pool, key=lambda a: a.get("score", 0.5))
+third       = max(1, len(pool_sorted) // 3)
+low, mid, high = pool_sorted[:third], pool_sorted[third:2*third], pool_sorted[2*third:]
+sample = (random.sample(high, min(2, len(high))) +
+          random.sample(mid,  min(3, len(mid)))  +
+          random.sample(low,  min(1, len(low))))
 ```
 
+The sampled articles are then **shuffled** before presentation to avoid reading fatigue from
+seeing the same score-ordered sequence each session.
+
 `\rate --ext` (extended mode) presents **all** unlabeled articles from `title_index.jsonl`
-in chronological order (newest first) with no time-window limit — the user labels as many
-as they wish and exits with `s`.
+in **random order** with no time-window limit — the user labels as many as they wish and
+exits with `s`.
 
 ---
 

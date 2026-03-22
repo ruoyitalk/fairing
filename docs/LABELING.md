@@ -16,15 +16,15 @@ fairing uses a three-tier labeling system. All tiers write to the same `feedback
         │
         ▼
 \rate  (Tier 1 — Mandatory Daily Batch)
-  └─ _run_mandatory_rate()   label today's sample; rate-gate blocks next \r
+  └─ _run_rate()   label today's sample (random order); rate-gate blocks next \r
         │
         ▼
 \rate --ext  (Tier 2 — Extended Labeling)
-  └─ _run_extended_rate()    label all unlabeled from title_index; no time limit
+  └─ _run_ext_rate()    label all unlabeled from title_index; random order; no time limit
         │
         ▼
 \lb  (Tier 3 — Label Browser)
-  └─ _run_label_browser()    search + edit any labeled entry
+  └─ _edit_label_entry()    search + edit any labeled entry
 
 All three tiers → feedback.jsonl → maybe_auto_train()
 ```
@@ -35,23 +35,23 @@ All three tiers → feedback.jsonl → maybe_auto_train()
 
 ### rate_pending.json
 
-Tracks today's mandatory labeling sample. Written by `\r`, consumed by `\rate`.
+Tracks the daily labeling target. Written by `\r`, consumed by `\rate`.
 
 ```json
 {
-  "run_date":   "2026-03-21",
-  "sample_urls": ["https://...", "https://..."],
-  "done_urls":   ["https://..."],
-  "completed":  false
+  "run_date":  "2026-03-21",
+  "n":         5,
+  "completed": false
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `run_date` | string | Beijing-date of the `\r` run that created the sample |
-| `sample_urls` | list[str] | Ordered list of URLs in this batch |
-| `done_urls` | list[str] | URLs already labeled or skipped |
-| `completed` | bool | `true` once all sample_urls are processed |
+| `run_date` | string | Beijing-date of the `\r` run |
+| `n` | int | Number of labels required today (3–8, proportional to article count) |
+| `completed` | bool | `true` once today's label count meets `n` |
+
+`completed` is set to `true` by any path that produces enough labels: `\rate`, `\im`, or `\lb`. Progress is computed live from `feedback.jsonl` (count of today's labels) rather than tracking specific article URLs.
 
 ### feedback.jsonl
 
@@ -66,7 +66,7 @@ Append-only training labels. On load, deduplicated by URL (latest entry wins).
 | `url` | string | Article URL (original, not normalized) |
 | `title` | string | Article title at time of labeling |
 | `source` | string | RSS source name |
-| `label` | int | `1` = relevant, `0` = not interested |
+| `label` | int | `1` = relevant, `-1` = not interested |
 | `label_index` | int | Monotonically increasing counter (used for decay weight) |
 | `date` | string | Beijing date of label (YYYY-MM-DD) |
 
@@ -90,31 +90,29 @@ Index of all articles ever seen by fairing. Used as the candidate pool for `\rat
 
 ## Tier 1 — Mandatory Daily Batch (`\rate`)
 
-### Sampling: `_sample_articles()`
+### Target count: `_calc_sample_n()`
 
-Called by `_save_pending()` at the end of each `\r` run.
+Called at the end of each `\r` run to determine today's labeling goal.
 
 ```python
-n    = min(8, max(3, len(articles) // 4))   # 3–8 articles, proportional to daily count
-pool = [a for a in articles if a["url"] not in already_labeled]
-sample = random.sample(pool, min(n, len(pool)))
+n = min(8, max(3, len(articles) // 4))   # 3–8, proportional to today's article count
 ```
 
-- **Simple random sampling** from today's new unlabeled articles.
-- `already_labeled` = set of URLs in `feedback.jsonl`.
-- Result written to `rate_pending.json` with `completed=false`.
+Written to `rate_pending.json` as `{"run_date": ..., "n": n, "completed": false}`.
+If today's label count in `feedback.jsonl` already meets `n`, `completed` is set to `true` immediately.
 
-### Card Loop: `_run_mandatory_rate()`
+### Card Loop: `_run_rate()`
 
-Presents each article in `sample_urls` as a card. On each card, the following keys are accepted:
+Draws articles from the **full unlabeled pool** (`title_index.jsonl`, same as `\rate --ext`) in random order and presents them as cards until `n` labels have been saved today. Progress is computed live from `feedback.jsonl` so labels from any path (`\im`, `\lb`, etc.) count toward the daily target.
+
+On each card, the following keys are accepted:
 
 | Key | Action |
 |-----|--------|
 | `+` | Label as relevant (label=1), advance |
-| `-` | Label as not interested (label=0), advance |
+| `-` | Label as not interested (label=-1), advance |
 | `n` | Skip — no label recorded, advance |
 | `o` | Open URL in system browser |
-| `r` | Deep-read: fetch full text, open in `$EDITOR` |
 | `d` | Send to payload queue (`payload_queue.json`) |
 | `p` | Go back to previous card |
 | `s` | Save progress and exit |
@@ -123,14 +121,14 @@ After each `+` or `-`, `save_feedback()` appends to `feedback.jsonl` and calls `
 
 ### Rate-Gate
 
-After `\r`, `rate_pending.json` is written with `completed=false`. The next `\r` checks:
+After `\r`, `rate_pending.json` is written. The next `\r` checks:
 
 ```
-if rate_pending exists AND completed=false AND run_date=today:
+if rate_pending exists AND completed=false:
     block run with warning — "complete \rate first, or use --force"
 ```
 
-Use `\r --force` to bypass. The gate exists to ensure at least one daily labeling session.
+Use `\r --force` to bypass. The gate exists to ensure at least one daily labeling session. `completed` is automatically set when today's label count (from any source) reaches `n`.
 
 ---
 
@@ -146,7 +144,7 @@ If either condition fails, the command is blocked with an explanation.
 
 ### Pool Construction
 
-All articles from `title_index.jsonl` that are not in `already_labeled`, sorted newest-first (by `date` field, then by order in file).
+All articles from `title_index.jsonl` that are not in `already_labeled`, presented in random order.
 
 No time-window limit — articles from any date are eligible.
 
@@ -232,11 +230,10 @@ Flow:
 
 | Key | Available in | Action |
 |-----|-------------|--------|
-| `+` | `\rate`, `\rate --ext` | Label relevant |
-| `-` | `\rate`, `\rate --ext` | Label not interested |
+| `+` | `\rate`, `\rate --ext` | Label relevant (label=1) |
+| `-` | `\rate`, `\rate --ext` | Label not interested (label=-1) |
 | `n` | `\rate`, `\rate --ext` | Skip (no label) |
 | `o` | `\rate`, `\rate --ext` | Open in browser |
-| `r` | `\rate`, `\rate --ext` | Deep-read in `$EDITOR` |
 | `d` | `\rate`, `\rate --ext` | Add to payload queue |
 | `p` | `\rate`, `\rate --ext` | Previous article |
 | `s` | `\rate`, `\rate --ext` | Save and exit |

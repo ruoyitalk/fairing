@@ -2,22 +2,38 @@
 
 # fairing — Payload Integration Reference
 
-**Version**: v1.0.0
+**Version**: v1.1.0
 
 ---
 
-## Pipeline Position
+## Architectural Boundary
+
+fairing and payload are two distinct services with a clear division of responsibility:
 
 ```
-fairing (run_digest / \rate / \rate --ext / \sd / \ps)
-  └─ payload_queue.json          queued article stubs
-
-payload (external consumer)
-  └─ reads payload_queue.json
-  └─ deduplicates by article_id
-  └─ fetches full content
-  └─ manages its own state
+┌─────────────────────────────────────────┐
+│  fairing                                │
+│                                         │
+│  RSS discovery → excerpt enrichment     │
+│  → embedding → scoring → labeling       │
+│  → email digest → payload_queue.json    │
+└────────────────────┬────────────────────┘
+                     │  article stubs
+                     ▼
+┌─────────────────────────────────────────┐
+│  payload consumer                       │
+│                                         │
+│  full-text fetch → reading / archiving  │
+│  → post-read judgement                  │
+│  → feedback.jsonl (append)              │
+└─────────────────────────────────────────┘
 ```
+
+**fairing is responsible for**: discovering articles, filtering noise, producing embeddings, training the relevance classifier, and delivering a daily digest. It curates *what is worth reading*.
+
+**The payload consumer is responsible for**: fetching full article text, presenting it to the user for deep reading, and deciding what to do with it (archive, annotate, feed into an LLM, etc.).
+
+fairing does not read articles for the user. The `o` key in `\rate` opens the browser — that is the extent of fairing's reading support.
 
 ---
 
@@ -28,138 +44,128 @@ article_id = sha256(normalize_url(url))[:16]
 ```
 
 - 16 hex characters = 64 bits of entropy.
-- Collision probability: approximately 9×10⁻⁸ over 100 years of daily operation.
-- `normalize_url()` strips tracking parameters and normalizes scheme/host, so the same article URL from different sources maps to the same ID.
+- `normalize_url()` strips tracking parameters and normalises scheme/host, so the same article from different sources maps to the same ID.
+- The payload consumer must use `article_id` as the primary deduplication key, not the raw URL.
 
 ---
 
 ## payload_queue.json Schema
 
-Each entry in the queue is a JSON object:
+Each entry is a JSON object:
 
 ```json
-{"article_id": "a1b2c3d4e5f6a7b8", "url": "https://...", "title": "...", "source": "HN", "queued_date": "2026-03-21"}
+{
+  "article_id": "a1b2c3d4e5f6a7b8",
+  "url":        "https://...",
+  "title":      "...",
+  "source":     "HN",
+  "queued_date": "2026-03-22"
+}
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `article_id` | string | `sha256(normalize_url(url))[:16]` — 16 hex chars |
-| `url` | string | Article URL (original, not normalized) |
-| `title` | string | Article title at time of queuing |
+| `article_id` | string | `sha256(normalize_url(url))[:16]` |
+| `url` | string | Article URL (original, not normalised) |
+| `title` | string | Title at time of queuing |
 | `source` | string | RSS source name |
 | `queued_date` | string | Beijing date queued (YYYY-MM-DD) |
 
-The file is a JSON array. fairing appends entries and deduplicates by `article_id` before writing.
+The file is a JSON array. fairing deduplicates by `article_id` before writing.
 
 ---
 
-## Three Ways to Add Articles
+## Four Ways to Add Articles
 
 ### 1. `d` key during `\rate` / `\rate --ext`
 
-During any labeling card session, press `d` to send the current article to `payload_queue.json`. The article is added immediately without leaving the card. The card remains visible; the user continues labeling.
+During any labeling session, press `d` to send the current article to the queue. Optionally prompts to also label it positive. The card stays on screen; labeling continues uninterrupted.
 
-### 2. `\sd <id>` — Send by ID
+### 2. `\sd <id>` — Enqueue by ID
 
 ```
 \sd a1b2c3d4e5f6a7b8
 ```
 
-Looks up the article by `article_id` in the search pool (see below). Displays article metadata and prompts for confirmation:
+(`\sd` → `enqueue`) Looks up the article by `article_id` in the search pool and queues it after confirmation.
+
+### 3. `\ps [keywords]` — Queue Search
 
 ```
-Title:  Distributed Query Optimizer in CockroachDB
-Source: HN
-Date:   2026-03-21
-
-Send to payload queue? [y/n]:
+\ps                   # browse all articles (paginated)
+\ps query optimizer   # filter by title keywords
 ```
 
-After confirmation, optionally prompts to label the article:
+(`\ps` → `queue_search`) Presents paginated results. Select entries by number across pages, then confirm batch addition.
+
+### 4. `\im <file.csv>` — Batch Import
 
 ```
-Label this article? [+/-/n]:
+\im ~/Downloads/articles.csv
 ```
 
-### 3. `\ps <keywords>` — Payload Search (batch)
+(`\im` → `import_csv`) Reads a CSV file and processes each row. Supports labeling, queuing, or both in a single operation.
 
-```
-\ps query optimizer
+CSV format — two columns, no header required:
+
+```csv
+article_id,action
+5e07b775ab1f3af6,+q
+a1b2c3d4e5f6a7b8,-
+deadbeef00000001,q
+cafebabe12345678,s
 ```
 
-Searches the search pool for articles matching all keywords (case-insensitive AND logic). Presents paginated results. The user selects entries, then confirms the batch:
+| action | meaning |
+|--------|---------|
+| `+` | label as valuable |
+| `-` | label as not interested |
+| `q` | add to queue (no label) |
+| `+q` | label as valuable AND add to queue |
+| `-q` | label as not interested AND add to queue |
+| `s` | skip (no operation) |
 
-```
-Send 3 articles to payload queue? [y/n]:
-```
-
-After confirmation, optionally prompts to label each selected article.
+Lines starting with `#` are treated as comments and ignored.
 
 ---
 
-## Search Pool Construction
-
-`\sd` and `\ps` build the search pool from three sources, merged in priority order:
-
-| Priority | Source | Notes |
-|----------|--------|-------|
-| 1 (primary) | `title_index.jsonl` | All articles ever seen; most comprehensive |
-| 2 (fallback) | `scoring_store.jsonl` | Articles with cached embeddings; subset of title_index |
-| 3 (supplement) | `last_run_articles.json` | Latest `\r` output; covers very recent articles |
-
-Entries from all three sources are merged by `article_id`. `title_index.jsonl` takes precedence for title and metadata. The combined pool is deduplicated.
-
----
-
-## Queue Management (`\pd`)
+## Queue Management
 
 ```
 \pd          # view current queue contents
 \pd clear    # clear the entire queue
 ```
 
-`\pd` displays the queue as a numbered list with `article_id`, title, source, and queued date.
-
-`\pd clear` prompts for confirmation before emptying `payload_queue.json`.
+(`\pd` → `queue`) `\pd clear` is the only supported way to reset the queue from within fairing. The payload consumer should not modify `payload_queue.json` directly.
 
 ---
 
-## Data File Write Summary
+## What the Payload Consumer Should Do
 
-| Action | Files Written |
-|--------|--------------|
-| `d` key during labeling | `payload_queue.json` (append + dedup) |
-| `\sd <id>` confirmed | `payload_queue.json` (append + dedup) |
-| `\ps` batch confirmed | `payload_queue.json` (append + dedup) |
-| Optional label after `\sd` / `\ps` | `feedback.jsonl` (append) |
-| `\pd clear` confirmed | `payload_queue.json` (cleared) |
+1. **Poll** `payload_queue.json` on a schedule or on demand.
+2. **Deduplicate** by `article_id` against its own processed history.
+3. **Fetch** full article text (Firecrawl, Jina, requests, or any other method).
+4. **Present** the content to the user for reading.
+5. **Clear** the queue via `\pd clear` after consuming, or manage its own consumed-ID list.
 
 ---
 
-## What Payload Should Do
+## Search Pool Construction
 
-fairing only writes stubs to `payload_queue.json`. The payload consumer is responsible for:
+`\sd` and `\ps` build their search pool from three sources, merged by `article_id`:
 
-1. **Reading** `payload_queue.json` and extracting `article_id` + `url`.
-2. **Deduplicating** by `article_id` against its own processed history.
-3. **Fetching** full article content (via Firecrawl, requests, or its own method).
-4. **Managing its own state** — fairing does not track which queue entries have been consumed.
-5. **Not modifying** `payload_queue.json` — use `\pd clear` from within fairing to reset the queue.
+| Priority | Source | Notes |
+|----------|--------|-------|
+| 1 | `title_index.jsonl` | All articles ever seen |
+| 2 | `scoring_store.jsonl` | Articles with cached embeddings |
+| 3 | `last_run_articles.json` | Latest `\r` output |
 
 ---
 
 ## Dynamic Lookback
 
-fairing uses dynamic lookback to avoid missing articles when `\r` runs are delayed.
-
 ```python
-effective_window = max(LOOKBACK_MIN_HOURS, hours_since_last_run)
-LOOKBACK_MIN_HOURS = 25   # minimum: always cover more than one calendar day
+effective_window = max(25, hours_since_last_run)
 ```
 
-On first run (no `last_run_time` recorded), fairing uses `2026-03-20` as the epoch — articles published after this date are eligible.
-
-This means:
-- Normal daily run: window = 25 hours (covers any scheduling jitter).
-- Skipped a day: window = 49+ hours (catches up automatically).
-- Payload consumers should expect articles from variable time ranges.
+On first run, fairing uses `2026-03-20` as the epoch. Skipped days are caught up automatically. Payload consumers should expect articles from variable time ranges.

@@ -85,7 +85,8 @@ def _article_row_full(a: dict, idx: int, article_id: str = "") -> str:
 
 
 def _build_html(articles: list[dict], today: str,
-                rank_offset: int = 0, part: int = 1, total_parts: int = 1) -> str:
+                rank_offset: int = 0, part: int = 1, total_parts: int = 1,
+                resend: bool = False) -> str:
     from .writer import top_n
     from .export import article_id_for
 
@@ -143,6 +144,12 @@ def _build_html(articles: list[dict], today: str,
 
     # Subject prefix and header are kept stable for email filter rules.
     # Filter on: subject starts with "[fairing]"
+    resend_banner = (
+        "<div style='background:#fff3cd;border:1px solid #ffc107;border-radius:6px;"
+        "padding:10px 16px;margin-bottom:20px;font-size:13px;color:#856404'>"
+        "⚠ 重发 — 此邮件为历史日期补发，非当日首发"
+        "</div>"
+    ) if resend else ""
     return f"""
 <html><body style="font-family:Arial,sans-serif;max-width:720px;margin:auto;padding:24px;color:#333">
   <h2 style="border-bottom:2px solid #1a73e8;padding-bottom:10px;margin-bottom:6px">
@@ -151,7 +158,7 @@ def _build_html(articles: list[dict], today: str,
   <p style="color:#888;margin:0 0 20px;font-size:13px">
     {today} · {len(articles)} articles · {len(by_source)} sources
   </p>
-  {"".join(rows)}
+  {resend_banner}{"".join(rows)}
   <hr style="margin-top:32px;border:none;border-top:1px solid #eee">
   <p style="color:#ccc;font-size:11px;margin-top:8px">
     [fairing] · JiekerTime
@@ -176,7 +183,8 @@ def _send_one(msg: MIMEMultipart, host: str, port: int,
         server.sendmail(user, mail_to, msg.as_string())
 
 
-def send_digest(articles: list[dict], force: bool = False) -> None:
+def send_digest(articles: list[dict], force: bool = False,
+                resend: bool = False, date: str = "") -> None:
     """Send digest email, skipping if content hash matches the previous send.
 
     Only sends when SMTP_USER / SMTP_PASSWORD / MAIL_TO are all configured.
@@ -185,6 +193,8 @@ def send_digest(articles: list[dict], force: bool = False) -> None:
 
     @param articles: full article list for the current run
     @param force:    if True, bypass the duplicate-hash check and always send
+    @param resend:   if True, mark subject and body as a resend
+    @param date:     date string for the subject; defaults to today (Beijing)
     """
     host     = os.environ.get("SMTP_HOST", "smtp.163.com")
     port     = int(os.environ.get("SMTP_PORT", "465"))
@@ -203,21 +213,22 @@ def send_digest(articles: list[dict], force: bool = False) -> None:
                        "(MD5: %s)", current_hash[:8])
         return
 
-    today   = _today_beijing()
-    batches = _split_batches(articles, split_n)
-    n_parts = len(batches)
+    target_date = date or _today_beijing()
+    batches     = _split_batches(articles, split_n)
+    n_parts     = len(batches)
     rank_offset = 0
+    resend_tag  = " [重发]" if resend else ""
 
     for part_idx, batch in enumerate(batches, 1):
-        subject = (f"[fairing] {today}" if n_parts == 1
-                   else f"[fairing] {today} ({part_idx}/{n_parts})")
+        subject = (f"[fairing] {target_date}{resend_tag}" if n_parts == 1
+                   else f"[fairing] {target_date}{resend_tag} ({part_idx}/{n_parts})")
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"]    = user
         msg["To"]      = mail_to
         msg.attach(MIMEText(
-            _build_html(batch, today, rank_offset=rank_offset,
-                        part=part_idx, total_parts=n_parts),
+            _build_html(batch, target_date, rank_offset=rank_offset,
+                        part=part_idx, total_parts=n_parts, resend=resend),
             "html", "utf-8",
         ))
         try:

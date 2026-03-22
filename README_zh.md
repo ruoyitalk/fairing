@@ -41,9 +41,8 @@ SMTP_PASSWORD=your_163_auth_code
 MAIL_TO=recipient@example.com
 GEMINI_API_KEY=AIzaSy...
 
-# 输出目录
-OBSIDIAN_DIR=~/Documents/ObsidianVault/fairing
-# NOTEBOOKLM_DIR=~/Documents/NotebookLM
+# 输出目录（每日摘要 + NotebookLM 文件）
+NEWS_DIR=~/files/coding/ruoyi_talk/news
 
 # 多端同步
 # DATA_DIR=~/OneDrive/fairing
@@ -83,22 +82,23 @@ python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
 
 | 快捷键 | 命令 | 参数 | 说明 |
 |--------|------|------|------|
-| `\r` | `run` | `[--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]` | 完整流水线：RSS → 嵌入 → 评分 → 写文件 → 发邮件 → 备份 |
+| `\r` | `run` | `[--no-mail] [--chinese] [--force]` | 完整流水线：RSS → 嵌入 → 评分 → 写摘要 → 发邮件 → 备份 |
 | `\rate` | `rate` | `[--ext]` | 每日必需打标批次；`--ext` 扩展至所有未标文章 |
 | `\lb` | `label_browser` | `[关键词]` | 按关键词搜索并修改历史标注 |
-| `\ms` | `model_status` | | 分类器状态、标注统计、信号词 |
-| `\rd` | `read` | `[N] [--zh]` | 按编号详读文章；不带 N 则列出所有 |
+| `\ms` | `model_status` | | 分类器状态、训练历史、信号词 |
+| `\slr` | `suspect` | | 审查可疑标注（模型与判断分歧 >60%） |
 | `\re` | `resend` | | 重建今日文章列表并强制重发邮件 |
-| `\dl` | `remd` | | 重建 Obsidian/NotebookLM 文件，不发邮件 |
+| `\dl` | `remd` | | 重建摘要文件，不发邮件 |
 | `\t` | `toggle` | `<N>` | 按编号启用或禁用 RSS 订阅源 |
-| `\c` | `config` | | 列出订阅源及 7 天文章数 |
+| `\c` | `config` | | 订阅源 · 7 天文章数 · 标注质量 · 上次时间 |
 | `\e` | `env` | `[set KEY VALUE]` | 查看或修改 `.env` 变量 |
 | `\l` | `log` | | 运行历史及每源文章数 |
 | `\bk` | `backup` | | 手动触发备份 |
 | `\rs` | `restore` | | 从备份恢复（展示差异，确认后执行） |
 | `\pd` | `payload_queue` | `[clear]` | 查看或清空 payload 队列 |
-| `\ps` | `payload_search` | `<关键词>` | 搜索文章并加入 payload 队列 |
+| `\ps` | `payload_search` | `[关键词]` | 浏览全部文章或按关键词过滤；加入 payload 队列 |
 | `\sd` | `send_by_id` | `<article_id>` | 按 ID 将指定文章加入 payload 队列 |
+| `\fb` | `fb` | `<article_id>` | 标注指定文章（+ 有价值 / - 不感兴趣） |
 | `\li` | `list_index` | | 查看 title_index.jsonl 最近条目 |
 | `\?` `\h` | `shortcuts` | | 显示命令速查表 |
 | `\q` | `quit` | | 退出 |
@@ -150,9 +150,8 @@ DATA_DIR=~/OneDrive/fairing
 | `GEMINI_API_KEY` | 是* | — | Gemini 翻译 Key（仅发英文邮件时可不填） |
 | `DATA_DIR` | 否 | 项目根目录 | 所有运行时数据文件 |
 | `BACKUP_DIR` | 否 | `~/Documents/fairing/data_bak` | 备份目标目录 |
-| `OBSIDIAN_DIR` | 否 | `~/Documents/fairing-vault` | Obsidian vault 输出目录 |
-| `NOTEBOOKLM_DIR` | 否 | （空） | NotebookLM 输出目录；不填则禁用 |
-| `FIRECRAWL_API_KEY` | 否 | — | Firecrawl 全文抓取，供 `\rd` 使用 |
+| `NEWS_DIR` | 否 | `~/Documents/fairing-news` | 输出根目录；日摘 → `NEWS_DIR/YYYY-WXX/`；NotebookLM → `NEWS_DIR/notebooklm/` |
+| `FIRECRAWL_API_KEY` | 否 | — | Firecrawl 摘要补充抓取 |
 | `TRANSLATOR` | 否 | `gemini` | 翻译后端：`gemini` / `openai` / `claude` |
 | `MAIL_SPLIT_N` | 否 | （关闭） | 将摘要邮件拆分为 N 封 |
 | `TOP_N` | 否 | `20` | 邮件中全文展示的文章数 |

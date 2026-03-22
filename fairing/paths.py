@@ -16,7 +16,7 @@ File layout under DATA_DIR:
     rate_pending.json            — labeling progress
     payload_queue.json           — handoff queue to downstream payload stage
     feed_errors.json             — consecutive feed failure tracking
-    last_run_articles.json       — score-sorted list for \\rd
+    last_run_articles.json       — (unused; reserved for future use)
     last_run_time                — timestamp of last successful run
     digest_hash                  — MD5 of last email send
     personal_model.pkl           — deployed LogisticRegressionCV
@@ -99,3 +99,6 @@ def payload_queue_file() -> Path:
 
 def feed_errors_file() -> Path:
     return data_path("feed_errors.json")
+
+def training_log_file() -> Path:
+    return data_path("training_log.jsonl")

@@ -61,7 +61,7 @@ Persistent defaults: set `RUN_MD`, `RUN_NOTEBOOK`, `RUN_CHINESE`, `RUN_NO_MAIL` 
 
 Without `--ext`: presents today's mandatory sample from `rate_pending.json`. Blocks until all articles are processed or user exits with `s`. Sets `completed=true` when done.
 
-With `--ext`: extended mode. Requires `rate_pending.completed == true`. Presents all unlabeled articles from `title_index.jsonl` (newest-first, no time limit).
+With `--ext`: extended mode. Requires `rate_pending.completed == true`. Presents all unlabeled articles from `title_index.jsonl` in random order, no time limit.
 
 ---
 
@@ -88,18 +88,7 @@ Displays:
 - Label counts: total, positive, negative.
 - Progress toward `MIN_TOTAL=80`.
 - If deployed: balanced_accuracy from last training run, top signal words (TF-IDF proxy).
-
----
-
-### `\rd` — Deep-Read Article
-
-```
-\rd [N] [--zh]
-```
-
-Without `N`: list all articles from the last `\r` run, sorted by score.
-
-With `N`: fetch full text of article N (using Firecrawl if `FIRECRAWL_API_KEY` set, otherwise `requests`). Open in `$EDITOR`. With `--zh`: append Chinese translation below the English text.
+- Training history: last 10 training attempts (date / samples / accuracy±std / C / deployed).
 
 ---
 
@@ -109,7 +98,7 @@ With `N`: fetch full text of article N (using Firecrawl if `FIRECRAWL_API_KEY` s
 \re
 ```
 
-Rebuilds today's full article list from `last_run_articles.json` and force-sends the email (bypassing the MD5 duplicate guard). Useful when the email was not received or needs to be resent after configuration changes.
+Rebuilds today's full article list from `seen_urls.json` + `scoring_store.jsonl` and force-sends the email (bypassing the MD5 duplicate guard). Useful when the email was not received or needs to be resent after configuration changes.
 
 ---
 
@@ -143,6 +132,8 @@ List all configured RSS sources with:
 - Index number.
 - Name and URL.
 - 7-day article count.
+- Label quality: positive labels / total labeled for this source (color-coded).
+- Time since last article.
 - Enable/disable status.
 
 ---
@@ -196,35 +187,80 @@ Interactive restore flow:
 
 ---
 
-### `\pd` — Payload Queue
+### `\pd` — Queue
 
 ```
 \pd
 \pd clear
 ```
 
-`\pd`: view current `payload_queue.json` contents.
+(`\pd` → `queue`) `\pd`: view current `payload_queue.json` contents.
 `\pd clear`: clear the queue (with confirmation).
 
 ---
 
-### `\ps` — Payload Search
+### `\ps` — Queue Search
 
 ```
-\ps <english keywords>
+\ps [english keywords]
 ```
 
-Search all known articles by title for payload queuing. Keywords are AND-matched (case-insensitive). Paginated results; select entries and confirm to add to `payload_queue.json`. Optionally label selected articles.
+(`\ps` → `queue_search`) Browse or search all known articles for payload queuing. Without keywords, shows all articles (paginated, newest first). With keywords, filters by title (AND-matched, case-insensitive). Navigate with `n`/`p`, select entries by number across pages, confirm to add to `payload_queue.json`. Optionally label selected articles.
 
 ---
 
-### `\sd` — Send by ID
+### `\sd` — Enqueue by ID
 
 ```
 \sd <article_id>
 ```
 
 Look up an article by its 16-hex `article_id` and add it to `payload_queue.json`. Displays metadata for confirmation. Optionally label after queuing.
+
+---
+
+### `\fb` — Label an Article by ID
+
+```
+\fb <article_id>
+```
+
+(`\fb` → `label`) Label a specific article as relevant (`+`) or not interested (`-`). Use after reading a full article via the payload consumer to record a high-quality judgment. Triggers `maybe_auto_train()` after saving.
+
+---
+
+### `\im` — Batch Import
+
+```
+\im <file.csv>
+```
+
+(`\im` → `import_csv`) Reads a CSV file and processes each row. Supports labeling, queuing, or both in a single pass. Triggers `maybe_auto_train()` if any labels were saved.
+
+CSV format — two columns, no header required:
+
+| action | meaning |
+|--------|---------|
+| `+` | label as valuable |
+| `-` | label as not interested |
+| `q` | add to payload queue (no label) |
+| `+q` | label as valuable AND add to queue |
+| `-q` | label as not interested AND add to queue |
+| `s` | skip (no operation) |
+
+Lines starting with `#` are ignored. Articles not found in the search pool are skipped with a count in the summary.
+
+---
+
+### `\slr` — Suspicious Label Review
+
+```
+\slr
+```
+
+Shows articles where the model's prediction strongly disagrees with the saved label (disagreement > 60%). Sorted by disagreement magnitude. Allows re-labeling in place. Triggers `maybe_auto_train()` after any changes.
+
+Requires a deployed model (`\ms` to check status).
 
 ---
 

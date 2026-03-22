@@ -205,3 +205,265 @@ def test_write_returns_correct_path(monkeypatch, tmp_path):
     from fairing.paths import payload_queue_file
     p = payload_queue_file()
     assert p.name == "payload_queue.json"
+
+
+# ── _dispatch_to_payload ────────────────────────────────────────────────────────
+
+def _make_article(url: str = "https://example.com/art") -> dict:
+    return {"url": url, "title": "Test Article", "source": "TestSrc"}
+
+
+def test_dispatch_returns_false_when_ask_label_false(monkeypatch, tmp_path):
+    """ask_label=False should add to queue and return False without prompting."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    result = m._dispatch_to_payload(_make_article(), ask_label=False)
+    assert result is False
+
+
+def test_dispatch_returns_false_when_already_positive(monkeypatch, tmp_path):
+    """Article already labeled positive: no prompt, return False."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    url = "https://example.com/already-pos"
+    # Pre-write a positive label
+    from fairing.trainer import save_feedback
+    save_feedback({"url": url, "title": "T", "source": "S", "label": 1,
+                   "label_index": 0, "date": "2026-03-21"})
+    prompted = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": prompted.append(prompt) or "")
+    result = m._dispatch_to_payload({"url": url, "title": "T", "source": "S"}, ask_label=True)
+    assert result is False
+    assert not prompted, "Should not prompt when article is already labeled positive"
+
+
+def test_dispatch_returns_true_when_user_confirms(monkeypatch, tmp_path):
+    """User answers 'y' to the label prompt: saves feedback, returns True."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+    result = m._dispatch_to_payload(_make_article(), ask_label=True)
+    assert result is True
+    from fairing.trainer import load_feedback
+    saved = load_feedback()
+    assert any(f["url"] == "https://example.com/art" and f["label"] == 1 for f in saved)
+
+
+def test_dispatch_returns_false_when_user_declines(monkeypatch, tmp_path):
+    """User answers 'n' to the label prompt: no feedback saved, returns False."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    result = m._dispatch_to_payload(_make_article(), ask_label=True)
+    assert result is False
+    from fairing.trainer import load_feedback
+    assert load_feedback() == []
+
+
+# ── do_import_csv ──────────────────────────────────────────────────────────────
+
+def _seed_index(tmp_path, entries):
+    """Write a minimal title_index.jsonl for find_by_id lookups."""
+    from fairing.export import article_id_for
+    idx = tmp_path / "title_index.jsonl"
+    import json
+    with idx.open("w") as f:
+        for e in entries:
+            aid = article_id_for(e["url"])
+            f.write(json.dumps({**e, "article_id": aid}) + "\n")
+
+
+def _make_csv(tmp_path, rows: list[tuple[str, str]]) -> object:
+    import csv, pathlib
+    p = tmp_path / "batch.csv"
+    with p.open("w", newline="") as f:
+        csv.writer(f).writerows(rows)
+    return p
+
+
+def test_import_csv_labels_positive(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for
+    url = "https://example.com/article1"
+    _seed_index(tmp_path, [{"url": url, "title": "T1", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "+")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    from fairing.trainer import load_feedback
+    saved = load_feedback()
+    assert any(f["url"] == url and f["label"] == 1 for f in saved)
+
+
+def test_import_csv_queues_article(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for, load_payload_queue
+    url = "https://example.com/article2"
+    _seed_index(tmp_path, [{"url": url, "title": "T2", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "q")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    queue = load_payload_queue()
+    assert any(e["article_id"] == aid for e in queue)
+
+
+def test_import_csv_labels_and_queues(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for, load_payload_queue
+    from fairing.trainer import load_feedback
+    url = "https://example.com/article3"
+    _seed_index(tmp_path, [{"url": url, "title": "T3", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "+q")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    assert any(f["url"] == url and f["label"] == 1 for f in load_feedback())
+    assert any(e["article_id"] == aid for e in load_payload_queue())
+
+
+def test_import_csv_skips_s_action(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for, load_payload_queue
+    from fairing.trainer import load_feedback
+    url = "https://example.com/article4"
+    _seed_index(tmp_path, [{"url": url, "title": "T4", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "s")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    assert load_feedback() == []
+    assert load_payload_queue() == []
+
+
+def test_import_csv_ignores_unknown_action(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for
+    url = "https://example.com/article5"
+    _seed_index(tmp_path, [{"url": url, "title": "T5", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "x")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    from fairing.trainer import load_feedback
+    assert load_feedback() == []
+
+
+def test_import_csv_labels_negative(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for
+    from fairing.trainer import load_feedback
+    url = "https://example.com/article6"
+    _seed_index(tmp_path, [{"url": url, "title": "T6", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "-")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    assert any(f["url"] == url and f["label"] == -1 for f in load_feedback())
+
+
+def test_import_csv_negative_and_queue(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for, load_payload_queue
+    from fairing.trainer import load_feedback
+    url = "https://example.com/article7"
+    _seed_index(tmp_path, [{"url": url, "title": "T7", "source": "S"}])
+    aid = article_id_for(url)
+    csv_path = _make_csv(tmp_path, [(aid, "-q")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    assert any(f["url"] == url and f["label"] == -1 for f in load_feedback())
+    assert any(e["article_id"] == aid for e in load_payload_queue())
+
+
+def test_import_csv_not_found_article(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _seed_index(tmp_path, [])
+    csv_path = _make_csv(tmp_path, [("0000000000000000", "+")])
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    from fairing.trainer import load_feedback
+    assert load_feedback() == []
+
+
+def test_import_csv_missing_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import main as m
+    printed = []
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: printed.append(a)})())
+    m.Shell().do_import_csv(str(tmp_path / "nonexistent.csv"))
+    # Should print an error panel, not crash
+    assert printed
+
+
+def test_import_csv_syncs_rate_pending(monkeypatch, tmp_path):
+    """Labeling enough articles via \im marks the daily task as completed."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import json
+    from fairing.export import article_id_for
+    from fairing.paths import rate_pending_file
+
+    url = "https://example.com/pending1"
+    _seed_index(tmp_path, [{"url": url, "title": "Pending", "source": "S"}])
+    aid = article_id_for(url)
+
+    # Simulate a pending task requiring 1 label
+    rate_pending_file().write_text(json.dumps({
+        "run_date": "2026-03-22",
+        "n": 1,
+        "completed": False,
+    }), encoding="utf-8")
+
+    csv_path = _make_csv(tmp_path, [(aid, "+")])
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(csv_path))
+
+    pending = json.loads(rate_pending_file().read_text(encoding="utf-8"))
+    assert pending["completed"] is True  # 1 label today >= n=1
+
+
+def test_import_csv_comments_ignored(monkeypatch, tmp_path):
+    """Lines starting with # should be skipped."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import article_id_for
+    from fairing.trainer import load_feedback
+    url = "https://example.com/article8"
+    _seed_index(tmp_path, [{"url": url, "title": "T8", "source": "S"}])
+    aid = article_id_for(url)
+    p = tmp_path / "batch.csv"
+    p.write_text(f"# this is a comment\n{aid},+\n", encoding="utf-8")
+
+    import main as m
+    monkeypatch.setattr(m, "console", type("C", (), {"print": lambda self, *a, **k: None})())
+    m.Shell().do_import_csv(str(p))
+
+    assert any(f["url"] == url and f["label"] == 1 for f in load_feedback())

@@ -41,9 +41,8 @@ SMTP_PASSWORD=your_163_auth_code
 MAIL_TO=recipient@example.com
 GEMINI_API_KEY=AIzaSy...
 
-# Output directories
-OBSIDIAN_DIR=~/Documents/ObsidianVault/fairing
-# NOTEBOOKLM_DIR=~/Documents/NotebookLM
+# Output directory (daily digests + NotebookLM files)
+NEWS_DIR=~/files/coding/ruoyi_talk/news
 
 # Multi-device sync
 # DATA_DIR=~/OneDrive/fairing
@@ -83,22 +82,23 @@ python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
 
 | Shortcut | Command | Params | Description |
 |----------|---------|--------|-------------|
-| `\r` | `run` | `[--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]` | Full pipeline: RSS → embed → score → write → email → backup |
+| `\r` | `run` | `[--no-mail] [--chinese] [--force]` | Full pipeline: RSS → embed → score → write digest → email → backup |
 | `\rate` | `rate` | `[--ext]` | Mandatory daily labeling sample; `--ext` extends to all unlabeled |
 | `\lb` | `label_browser` | `[keywords]` | Browse and edit labeled articles by keyword search |
-| `\ms` | `model_status` | | Classifier status, label counts, signal words |
-| `\rd` | `read` | `[N] [--zh]` | Deep-read article by index; list all if no N |
+| `\ms` | `model_status` | | Classifier status, training history, signal words |
+| `\slr` | `suspect` | | Review labels where model disagrees (>60% divergence) |
 | `\re` | `resend` | | Rebuild today's article list and force-send email |
-| `\dl` | `remd` | | Rebuild Obsidian/NotebookLM files without email |
+| `\dl` | `remd` | | Rebuild digest file without email |
 | `\t` | `toggle` | `<N>` | Enable or disable RSS source by index |
-| `\c` | `config` | | List sources with 7-day article counts |
+| `\c` | `config` | | Sources with 7-day counts, label quality, last-seen time |
 | `\e` | `env` | `[set KEY VALUE]` | View or update `.env` variables |
 | `\l` | `log` | | Run history with per-source breakdown |
 | `\bk` | `backup` | | Manual backup trigger |
 | `\rs` | `restore` | | Restore from backup with diff + confirmation |
 | `\pd` | `payload_queue` | `[clear]` | View or clear payload queue |
-| `\ps` | `payload_search` | `<keywords>` | Search articles and add to payload queue |
+| `\ps` | `payload_search` | `[keywords]` | Browse all articles or filter by keyword; add to payload queue |
 | `\sd` | `send_by_id` | `<article_id>` | Add specific article to payload queue by ID |
+| `\fb` | `fb` | `<article_id>` | Label a specific article (+/-) |
 | `\li` | `list_index` | | List recent entries in title_index.jsonl |
 | `\?` `\h` | `shortcuts` | | Show command reference |
 | `\q` | `quit` | | Exit |
@@ -150,9 +150,8 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 | `GEMINI_API_KEY` | Yes* | — | Gemini key for translation (not needed if always English) |
 | `DATA_DIR` | No | project root | All runtime data files |
 | `BACKUP_DIR` | No | `~/Documents/fairing/data_bak` | Backup destination |
-| `OBSIDIAN_DIR` | No | `~/Documents/fairing-vault` | Obsidian vault output |
-| `NOTEBOOKLM_DIR` | No | _(empty)_ | NotebookLM output; omit to disable |
-| `FIRECRAWL_API_KEY` | No | — | Firecrawl for full-text fetch in `\rd` |
+| `NEWS_DIR` | No | `~/Documents/fairing-news` | Root output directory; daily digests → `NEWS_DIR/YYYY-WXX/`; NotebookLM → `NEWS_DIR/notebooklm/` |
+| `FIRECRAWL_API_KEY` | No | — | Firecrawl for excerpt enrichment |
 | `TRANSLATOR` | No | `gemini` | Translation backend: `gemini` / `openai` / `claude` |
 | `MAIL_SPLIT_N` | No | _(off)_ | Split digest email into N parts |
 | `TOP_N` | No | `20` | Articles shown in full detail in email |

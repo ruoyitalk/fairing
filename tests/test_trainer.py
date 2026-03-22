@@ -143,3 +143,39 @@ def test_train_creates_model_file_when_accurate(patch_feedback):
         from fairing.paths import model_file, scaler_file
         assert model_file().exists()
         assert scaler_file().exists()
+
+
+def test_train_writes_training_log(patch_feedback):
+    """_train() appends one record to training_log.jsonl."""
+    from fairing.trainer import maybe_auto_train, save_feedback, MIN_TOTAL
+    from fairing.paths import training_log_file
+    n = MIN_TOTAL // 2 + 5
+    feedback, store = _synthetic_store(n, n)
+    for f in feedback:
+        save_feedback(f)
+    before_lines = (
+        len(training_log_file().read_text(encoding="utf-8").splitlines())
+        if training_log_file().exists() else 0
+    )
+    result = maybe_auto_train(store)
+    assert result is not None
+    assert training_log_file().exists()
+    after_lines = len(training_log_file().read_text(encoding="utf-8").splitlines())
+    assert after_lines == before_lines + 1
+
+
+def test_training_log_schema(patch_feedback):
+    """training_log.jsonl entries contain required fields."""
+    import json as _json
+    from fairing.trainer import maybe_auto_train, save_feedback, MIN_TOTAL
+    from fairing.paths import training_log_file
+    n = MIN_TOTAL // 2 + 5
+    feedback, store = _synthetic_store(n, n)
+    for f in feedback:
+        save_feedback(f)
+    maybe_auto_train(store)
+    row = _json.loads(training_log_file().read_text(encoding="utf-8").splitlines()[-1])
+    for field in ("date", "n_samples", "n_pos", "n_neg", "cv_accuracy", "cv_std", "C", "deployed"):
+        assert field in row, f"missing field: {field}"
+    assert isinstance(row["deployed"], bool)
+    assert 0.0 <= row["cv_accuracy"] <= 1.0

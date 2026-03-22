@@ -12,3 +12,4 @@ sentence-transformers>=3.0
 # Optional translation backends (install the one you use):
 # openai>=1.0          for TRANSLATOR=openai or ollama
 # anthropic>=0.25      for TRANSLATOR=claude
+
