@@ -80,6 +80,19 @@ rss:
     url: https://www.youtube.com/feeds/videos.xml?channel_id=UCHnBsf2rH-K7pn09rb3qvkA
     category: Research / Video
 
+  # ── 内容发现（电影/剧集）────────────────────────────────────────────────────────
+  - name: 豆瓣电影新片
+    url: https://www.douban.com/feed/review/movie
+    category: Media / Discovery
+
+  - name: Letterboxd 本周热门
+    url: https://letterboxd.com/films/popular/this/week.rss
+    category: Media / Discovery
+
+  - name: Roger Ebert Reviews
+    url: https://www.rogerebert.com/feed
+    category: Media / Reviews
+
   # ── AGI / Deep AI Research ───────────────────────────────────────────────────
   - name: Latent Space
     url: https://www.latent.space/feed
