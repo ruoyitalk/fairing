@@ -53,18 +53,14 @@ rss:
     url: https://rss.arxiv.org/atom/cs.DB+cs.AR+cs.OS
     category: Research
 
-  # ── GitHub Releases ──────────────────────────────────────────────────────────
-  - name: Apache Calcite Releases
-    url: https://github.com/apache/calcite/releases.atom
-    category: Release
+  # ── Databases & Distributed Systems (deep work) ─────────────────────────────
+  - name: PingCAP Blog
+    url: https://www.pingcap.com/blog/rss.xml
+    category: Database
 
-  - name: Trino Releases
-    url: https://github.com/trinodb/trino/releases.atom
-    category: Release
-
-  - name: ClickHouse Releases
-    url: https://github.com/ClickHouse/ClickHouse/releases.atom
-    category: Release
+  - name: Martin Kleppmann
+    url: https://martin.kleppmann.com/feed.xml
+    category: Database / Distributed
 
   # ── Community ─────────────────────────────────────────────────────────────────
   - name: "HackerNews: query optimizer"
@@ -113,11 +109,28 @@ rss:
     url: https://astralcodexten.substack.com/feed
     category: AI / Rationality
 
-  # ── Newsletters ───────────────────────────────────────────────────────────────
-  - name: FinOps Foundation
-    url: https://www.finops.org/feed/
-    category: Cloud / FinOps
+  # ── AI 实战 & 商业影响 ────────────────────────────────────────────────────────
+  - name: Simon Willison
+    url: https://simonwillison.net/atom/everything/
+    category: AI / Engineering
 
+  - name: One Useful Thing
+    url: https://www.oneusefulthing.org/feed
+    category: AI / Business
+
+  - name: Import AI
+    url: https://importai.substack.com/feed
+    category: AI / Research
+
+  - name: MIT Sloan Management Review
+    url: https://sloanreview.mit.edu/feed/
+    category: AI / Business
+
+  - name: a16z
+    url: https://a16z.com/feed/
+    category: AI / Venture
+
+  # ── Newsletters ───────────────────────────────────────────────────────────────
   - name: benn.substack
     url: https://benn.substack.com/feed/
     category: Data / Strategy
