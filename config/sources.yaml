@@ -84,6 +84,35 @@ rss:
     url: https://www.youtube.com/feeds/videos.xml?channel_id=UCHnBsf2rH-K7pn09rb3qvkA
     category: Research / Video
 
+  # ── AGI / Deep AI Research ───────────────────────────────────────────────────
+  - name: Latent Space
+    url: https://www.latent.space/feed
+    category: AI / AGI
+
+  - name: SemiAnalysis
+    url: https://www.semianalysis.com/feed
+    category: AI / Infrastructure
+
+  - name: Gwern
+    url: https://gwern.net/atom.xml
+    category: AI / Research
+
+  - name: Stephen Wolfram Writings
+    url: https://writings.stephenwolfram.com/feed/
+    category: AI / Philosophy
+
+  - name: Dwarkesh Podcast
+    url: https://www.dwarkeshpatel.com/feed
+    category: AI / Interviews
+
+  - name: LessWrong
+    url: https://www.lesswrong.com/feed.xml
+    category: AI / Rationality
+
+  - name: Astral Codex Ten
+    url: https://astralcodexten.substack.com/feed
+    category: AI / Rationality
+
   # ── Newsletters ───────────────────────────────────────────────────────────────
   - name: FinOps Foundation
     url: https://www.finops.org/feed/
