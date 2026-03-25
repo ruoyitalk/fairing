@@ -11,6 +11,7 @@ import os
 import re
 import smtplib
 import ssl
+import time
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -239,5 +240,7 @@ def send_digest(articles: list[dict], force: bool = False,
             logger.warning("Email part %d/%d failed: %s", part_idx, n_parts, exc)
             return
         rank_offset += len(batch)
+        if part_idx < n_parts:
+            time.sleep(10)  # avoid 163 SMTP rate limiting between parts
 
     _save_hash(current_hash)
