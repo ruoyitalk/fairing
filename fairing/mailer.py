@@ -241,6 +241,6 @@ def send_digest(articles: list[dict], force: bool = False,
             return
         rank_offset += len(batch)
         if part_idx < n_parts:
-            time.sleep(10)  # avoid 163 SMTP rate limiting between parts
+            time.sleep(30)  # avoid 163 SMTP rate limiting between parts
 
     _save_hash(current_hash)
