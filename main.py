@@ -85,11 +85,17 @@ _SHORTCUTS: dict[str, str] = {
     r"\q":    "quit",
 }
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-7s  %(message)s",
-    datefmt="%H:%M:%S",
-)
+class _BeijingFormatter(logging.Formatter):
+    _TZ = timezone(timedelta(hours=8))
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        dt = datetime.fromtimestamp(record.created, tz=self._TZ)
+        return dt.strftime(datefmt or "%H:%M:%S")
+
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_BeijingFormatter("%(asctime)s  %(levelname)-7s  %(message)s", datefmt="%H:%M:%S"))
+logging.basicConfig(level=logging.INFO, handlers=[_handler])
 logger = logging.getLogger(__name__)
 
 # Suppress noisy third-party loggers — only let WARNING+ through.

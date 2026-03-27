@@ -175,13 +175,41 @@ def _split_batches(articles: list[dict], split_n: int) -> list[list[dict]]:
     return [articles[i:i + split_n] for i in range(0, len(articles), split_n)]
 
 
+_RETRY_DELAYS = (5, 15)  # seconds between attempts; total 3 attempts
+
+
 def _send_one(msg: MIMEMultipart, host: str, port: int,
               user: str, password: str, mail_to: str) -> None:
     """Send a single MIME message via SMTP_SSL."""
     context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(host, port, context=context) as server:
+    with smtplib.SMTP_SSL(host, port, context=context, timeout=30) as server:
         server.login(user, password)
         server.sendmail(user, mail_to, msg.as_string())
+
+
+def _send_with_retry(msg: MIMEMultipart, host: str, port: int,
+                     user: str, password: str, mail_to: str,
+                     part_idx: int, n_parts: int) -> bool:
+    """Try sending with retries on transient SMTP failures.
+
+    @return: True if sent successfully, False after all attempts exhausted.
+    """
+    last_exc: Exception | None = None
+    attempts = len(_RETRY_DELAYS) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            _send_one(msg, host, port, user, password, mail_to)
+            return True
+        except Exception as exc:
+            last_exc = exc
+            if attempt < attempts:
+                delay = _RETRY_DELAYS[attempt - 1]
+                logger.warning("Email part %d/%d attempt %d/%d failed: %s — retrying in %ds",
+                               part_idx, n_parts, attempt, attempts, exc, delay)
+                time.sleep(delay)
+    logger.error("Email part %d/%d failed after %d attempts: %s",
+                 part_idx, n_parts, attempts, last_exc)
+    return False
 
 
 def send_digest(articles: list[dict], force: bool = False,
@@ -232,13 +260,11 @@ def send_digest(articles: list[dict], force: bool = False,
                         part=part_idx, total_parts=n_parts, resend=resend),
             "html", "utf-8",
         ))
-        try:
-            _send_one(msg, host, port, user, password, mail_to)
-            logger.info("Email part %d/%d sent → %s  [MD5: %s]",
-                        part_idx, n_parts, mail_to, current_hash[:8])
-        except Exception as exc:
-            logger.warning("Email part %d/%d failed: %s", part_idx, n_parts, exc)
+        if not _send_with_retry(msg, host, port, user, password, mail_to,
+                                part_idx, n_parts):
             return
+        logger.info("Email part %d/%d sent → %s  [MD5: %s]",
+                    part_idx, n_parts, mail_to, current_hash[:8])
         rank_offset += len(batch)
         if part_idx < n_parts:
             time.sleep(30)  # avoid 163 SMTP rate limiting between parts
