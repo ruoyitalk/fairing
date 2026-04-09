@@ -9,6 +9,7 @@
 #   name              display name
 #   url               RSS/Atom feed URL
 #   category          used for grouping in output
+#   tags              semantic labels for fan-out routing (see subscriptions.yaml)
 #   firecrawl_fulltext  true = fetch full article body via Firecrawl API
 
 rss:
@@ -16,134 +17,284 @@ rss:
   - name: ClickHouse Blog
     url: https://clickhouse.com/rss.xml
     category: Database
+    tags: [database, olap]
     firecrawl_fulltext: true
 
   - name: Databricks Blog
     url: http://databricks.com/feed
     category: Data Platform
+    tags: [database, data_platform, ai]
     firecrawl_fulltext: true
+
+  - name: PingCAP Blog
+    url: https://www.pingcap.com/blog/rss.xml
+    category: Database
+    tags: [database]
+
+  - name: Martin Kleppmann
+    url: https://martin.kleppmann.com/feed.xml
+    category: Database / Distributed
+    tags: [database, software_engineering]
+
+  - name: Percona Blog
+    url: https://www.percona.com/blog/feed/
+    category: Database
+    tags: [database]
 
   # ── AI / ML ──────────────────────────────────────────────────────────────────
   - name: Qdrant Blog
     url: https://qdrant.tech/articles/index.xml
     category: AI / Vector DB
+    tags: [ai, vector_db]
 
   - name: NVIDIA Developer Blog
     url: https://developer.nvidia.com/blog/feed/
     category: AI / Infrastructure
+    tags: [ai, ai_infrastructure]
 
   - name: Lilian Weng
     url: https://lilianweng.github.io/index.xml
     category: AI / ML Research
+    tags: [ai, ai_research, ml_research]
 
   - name: Eugene Yan
     url: https://eugeneyan.com/rss/
     category: AI / ML
+    tags: [ai, ai_engineering, ml_research]
 
   - name: Anthropic Engineering
     url: https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_engineering.xml
     category: AI / Engineering
+    tags: [ai, ai_engineering]
 
   - name: ByteByteGo
     url: https://blog.bytebytego.com/feed
     category: Architecture
+    tags: [software_engineering, architecture]
 
   # ── Research ─────────────────────────────────────────────────────────────────
   - name: "arXiv cs.DB/cs.AR/cs.OS"
     url: https://rss.arxiv.org/atom/cs.DB+cs.AR+cs.OS
     category: Research
+    tags: [database]
 
-  # ── Databases & Distributed Systems (deep work) ─────────────────────────────
-  - name: PingCAP Blog
-    url: https://www.pingcap.com/blog/rss.xml
-    category: Database
+  - name: "arXiv cs.AI/cs.CL/cs.LG"
+    url: https://rss.arxiv.org/atom/cs.AI+cs.CL+cs.LG
+    category: Research / AI
+    tags: [ai, ai_research, ml_research]
 
-  - name: Martin Kleppmann
-    url: https://martin.kleppmann.com/feed.xml
-    category: Database / Distributed
+  # ── GitHub Releases ──────────────────────────────────────────────────────────
+  - name: CockroachDB Releases
+    url: https://github.com/cockroachdb/cockroach/releases.atom
+    category: Database / Release
+    tags: [database]
+
+  - name: TiDB Releases
+    url: https://github.com/pingcap/tidb/releases.atom
+    category: Database / Release
+    tags: [database]
+
+  - name: ShardingSphere Releases
+    url: https://github.com/apache/shardingsphere/releases.atom
+    category: Database / Release
+    tags: [database]
 
   # ── Community ─────────────────────────────────────────────────────────────────
   - name: "HackerNews: query optimizer"
     url: https://hnrss.org/newest?q=database+query+optimizer
     category: Community
+    tags: [database]
 
   - name: "HackerNews: distributed systems"
     url: https://hnrss.org/newest?q=distributed+systems
     category: Community
+    tags: [software_engineering, architecture]
 
   - name: r/dataengineering
     url: https://www.reddit.com/r/dataengineering/.rss
     category: Community
+    tags: [database, data_platform]
 
   # ── Video ─────────────────────────────────────────────────────────────────────
   - name: CMU Database Group
     url: https://www.youtube.com/feeds/videos.xml?channel_id=UCHnBsf2rH-K7pn09rb3qvkA
     category: Research / Video
-
+    tags: [database]
 
   # ── AGI / Deep AI Research ───────────────────────────────────────────────────
   - name: Latent Space
     url: https://www.latent.space/feed
     category: AI / AGI
+    tags: [ai, ai_research]
 
   - name: SemiAnalysis
     url: https://www.semianalysis.com/feed
     category: AI / Infrastructure
+    tags: [ai, ai_infrastructure]
 
   - name: Gwern
     url: https://gwern.net/atom.xml
     category: AI / Research
+    tags: [ai, ai_research, rationality]
 
   - name: Stephen Wolfram Writings
     url: https://writings.stephenwolfram.com/feed/
     category: AI / Philosophy
+    tags: [ai, ai_research, philosophy]
 
   - name: Dwarkesh Podcast
     url: https://www.dwarkeshpatel.com/feed
     category: AI / Interviews
+    tags: [ai, ai_research]
 
   - name: LessWrong
     url: https://www.lesswrong.com/feed.xml
     category: AI / Rationality
+    tags: [ai, rationality]
 
   - name: Astral Codex Ten
     url: https://astralcodexten.substack.com/feed
     category: AI / Rationality
+    tags: [ai, rationality, psychology]
 
-  # ── AI 实战 & 商业影响 ────────────────────────────────────────────────────────
+  # ── AI Practice & Business ───────────────────────────────────────────────────
   - name: Simon Willison
     url: https://simonwillison.net/atom/everything/
     category: AI / Engineering
+    tags: [ai, ai_engineering]
 
   - name: One Useful Thing
     url: https://www.oneusefulthing.org/feed
     category: AI / Business
+    tags: [ai, business]
 
   - name: Import AI
     url: https://importai.substack.com/feed
     category: AI / Research
+    tags: [ai, ai_research]
 
   - name: MIT Sloan Management Review
     url: https://sloanreview.mit.edu/feed/
     category: AI / Business
+    tags: [business, management]
 
   - name: a16z
     url: https://a16z.com/feed/
     category: AI / Venture
+    tags: [ai, business]
+
+  # ── AI Models & Platforms ────────────────────────────────────────────────────
+  - name: HuggingFace Blog
+    url: https://huggingface.co/blog/feed.xml
+    category: AI / Models
+    tags: [ai, ai_research, ml_research]
+
+  - name: Google DeepMind Blog
+    url: https://deepmind.google/blog/rss.xml
+    category: AI / Research
+    tags: [ai, ai_research]
+    firecrawl_fulltext: true
+
+  - name: Google AI Blog
+    url: https://blog.google/technology/ai/rss/
+    category: AI / Industry
+    tags: [ai, ai_engineering]
+    firecrawl_fulltext: true
 
   # ── Newsletters ───────────────────────────────────────────────────────────────
   - name: benn.substack
     url: https://benn.substack.com/feed/
     category: Data / Strategy
+    tags: [data_platform, business]
 
   - name: Software Architecture Weekly
     url: https://softwarearchitectureweekly.substack.com/feed
     category: Architecture
+    tags: [software_engineering, architecture]
 
   - name: The Pragmatic Engineer
     url: https://newsletter.pragmaticengineer.com/feed
     category: Engineering
+    tags: [software_engineering, engineering]
 
   - name: Curious Engineer
     url: https://vivekbansal.substack.com/feed
     category: Engineering
+    tags: [software_engineering, engineering]
+
+  # ── Economics ─────────────────────────────────────────────────────────────────
+  - name: Marginal Revolution
+    url: https://marginalrevolution.com/feed
+    category: Economics
+    tags: [economics]
+
+  - name: Conversable Economist
+    url: https://conversableeconomist.com/feed/
+    category: Economics
+    tags: [economics]
+
+  - name: Noah Smith
+    url: https://noahpinion.substack.com/feed
+    category: Economics
+    tags: [economics, business]
+
+  - name: Matt Stoller (BIG)
+    url: https://mattstoller.substack.com/feed
+    category: Business / Policy
+    tags: [business, management, economics]
+
+  # ── Philosophy / Culture / Psychology ─────────────────────────────────────────
+  - name: Aeon
+    url: https://aeon.co/feed
+    category: Philosophy / Culture
+    tags: [philosophy, culture, psychology]
+    firecrawl_fulltext: true
+
+  - name: The Marginalian
+    url: https://www.themarginalian.org/feed/
+    category: Humanities / Cross-disciplinary
+    tags: [philosophy, culture, psychology]
+
+  - name: Daily Stoic
+    url: https://dailystoic.com/feed/
+    category: Philosophy
+    tags: [philosophy, psychology]
+
+  # ── Buddhism ──────────────────────────────────────────────────────────────────
+  - name: Tricycle
+    url: https://tricycle.org/feed/
+    category: Buddhism
+    tags: [buddhism]
+
+  - name: "Lion's Roar"
+    url: https://www.lionsroar.com/feed/
+    category: Buddhism
+    tags: [buddhism]
+
+  # ── Systems Thinking / Mental Models ──────────────────────────────────────────
+  - name: Farnam Street
+    url: https://fs.blog/feed/
+    category: Systems Thinking
+    tags: [systems_thinking, mental_models]
+    firecrawl_fulltext: true
+
+  - name: "HackerNews: systems thinking"
+    url: https://hnrss.org/newest?q=systems+thinking
+    category: Systems Thinking
+    tags: [systems_thinking, mental_models]
+
+  - name: "HackerNews: behavioral economics"
+    url: https://hnrss.org/newest?q=behavioral+economics
+    category: Behavioral Economics
+    tags: [economics, psychology, systems_thinking]
+
+  # ── Writing / Literature ──────────────────────────────────────────────────────
+  - name: Literary Hub
+    url: https://lithub.com/feed/
+    category: Writing / Literature
+    tags: [writing, culture]
+
+  - name: Longreads
+    url: https://longreads.com/feed/
+    category: Writing / Longform
+    tags: [writing, culture]
