@@ -178,10 +178,11 @@ rss:
     category: AI / Business
     tags: [business, management]
 
-  - name: a16z
-    url: https://a16z.com/feed/
-    category: AI / Venture
-    tags: [ai, business]
+  # a16z feed blocked/broken — 26+ consecutive failures (disabled 2026-04-09)
+  # - name: a16z
+  #   url: https://a16z.com/feed/
+  #   category: AI / Venture
+  #   tags: [ai, business]
 
   # ── AI Models & Platforms ────────────────────────────────────────────────────
   - name: HuggingFace Blog
