@@ -185,6 +185,7 @@ def fetch_rss(sources: list[RssSource],
             articles.append({
                 "source": source.name,
                 "category": source.category,
+                "tags": source.tags,
                 "title": title,
                 "url": entry.get("link", ""),
                 "published": pub.strftime("%Y-%m-%d %H:%M UTC") if pub else "unknown",

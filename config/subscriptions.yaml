@@ -1,0 +1,59 @@
+# Subscription definitions for fan-out routing.
+#
+# Each subscriber declares which tags it wants. When fairing processes an
+# article, it checks the source's tags against each subscriber's tag list.
+# If ANY tag matches, the article is written to that subscriber's output file.
+#
+# This is a file-based pub-sub model:
+#   Publisher  = RSS source (tagged in sources.yaml)
+#   Broker     = fairing (matches tags, writes to subscriber outputs)
+#   Subscriber = downstream consumer (reads its own output file)
+#
+# Adding a new subscriber requires only a config entry here — no code changes.
+
+subscribers:
+  gp:
+    tags:
+      - database
+      - ai
+      - ai_research
+      - ai_engineering
+      - ai_infrastructure
+      - ml_research
+      - vector_db
+      - software_engineering
+      - architecture
+      - philosophy
+      - culture
+      - history
+      - psychology
+      - anthropology
+      - economics
+      - business
+      - buddhism
+      - taoism
+      - systems_thinking
+      - mental_models
+      - writing
+      - sociology
+      - management
+      - data_platform
+      - rationality
+    output: /data/fairing/feeds/gp/store.jsonl
+
+  ruoyi_talk:
+    tags:
+      - database
+      - ai
+      - ai_research
+      - ai_engineering
+      - ai_infrastructure
+      - ml_research
+      - vector_db
+      - software_engineering
+      - architecture
+      - engineering
+      - data_platform
+      - cloud
+      - rationality
+    output: /data/fairing/feeds/ruoyi_talk/store.jsonl

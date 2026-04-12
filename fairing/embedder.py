@@ -71,6 +71,67 @@ def _append_store(entry: dict) -> None:
         f.write(json.dumps(title_entry, ensure_ascii=False) + "\n")
 
 
+# ── Fan-out to subscriber output files ────────────────────────────────────────
+
+def fan_out(articles: list[dict], subscriptions: list) -> dict:
+    """Write articles to per-subscriber output files based on tag matching.
+
+    Each subscriber declares a set of tags. An article matches a subscriber
+    if ANY of the article's source tags is in the subscriber's tag set.
+    Matched articles are appended to the subscriber's output JSONL file.
+
+    @param articles: processed article list (must have 'tags' field from source)
+    @param subscriptions: list of Subscription objects from config
+    @return: stats dict {subscriber_name: {"matched": N, "written": N}}
+    """
+    from pathlib import Path
+
+    stats = {}
+    for sub in subscriptions:
+        sub_tags = set(sub.tags)
+        matched = [a for a in articles if set(a.get("tags", [])) & sub_tags]
+        stats[sub.name] = {"matched": len(matched), "written": 0}
+
+        if not matched:
+            continue
+
+        out_path = Path(sub.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing URLs for dedup within subscriber file
+        existing_urls: set[str] = set()
+        if out_path.exists():
+            for line in out_path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    try:
+                        existing_urls.add(json.loads(line).get("url", ""))
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+
+        written = 0
+        with out_path.open("a", encoding="utf-8") as f:
+            for a in matched:
+                if a.get("url", "") in existing_urls:
+                    continue
+                entry = {
+                    "url":   a.get("url", ""),
+                    "title": a.get("title", ""),
+                    "date":  a.get("published", ""),
+                    "source": a.get("source", ""),
+                    "category": a.get("category", ""),
+                    "tags":  a.get("tags", []),
+                    "text_for_scoring": a.get("text_for_scoring", ""),
+                }
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                written += 1
+        stats[sub.name]["written"] = written
+        if written:
+            logger.info("[fan-out] %s: %d/%d articles written to %s",
+                        sub.name, written, len(matched), sub.output)
+
+    return stats
+
+
 def enrich(articles: list[dict]) -> list[dict]:
     """Add text_for_scoring and embedding to each article, using cache.
 

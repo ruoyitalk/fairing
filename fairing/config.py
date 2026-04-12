@@ -17,6 +17,7 @@ class RssSource:
     name: str
     url: str
     category: str
+    tags: list[str] = field(default_factory=list)
     # False when the source name appears in the 'disabled' list of sources.local.yaml,
     # or when the source entry itself sets enabled: false.
     enabled: bool = True
@@ -54,7 +55,37 @@ class Config:
                 name=s["name"],
                 url=s["url"],
                 category=s.get("category", "General"),
+                tags=s.get("tags", []),
                 enabled=s.get("enabled", True) and s["name"] not in disabled,
             )
             for s in rss_entries
         ]
+
+        # Load subscriptions (fan-out routing)
+        self.subscriptions = _load_subscriptions()
+
+
+# ── Subscriptions ────────────────────────────────────────────────────────────
+
+_SUBSCRIPTIONS_FILE = _CONFIG_DIR / "subscriptions.yaml"
+
+
+@dataclass
+class Subscription:
+    name: str
+    tags: list[str]
+    output: str
+
+
+def _load_subscriptions() -> list[Subscription]:
+    if not _SUBSCRIPTIONS_FILE.exists():
+        return []
+    raw = yaml.safe_load(_SUBSCRIPTIONS_FILE.read_text(encoding="utf-8")) or {}
+    subs = []
+    for name, cfg in raw.get("subscribers", {}).items():
+        subs.append(Subscription(
+            name=name,
+            tags=cfg.get("tags", []),
+            output=cfg.get("output", ""),
+        ))
+    return subs

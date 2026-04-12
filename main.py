@@ -1336,7 +1336,7 @@ def run_digest(chinese: bool = False,
 
     from fairing.config import Config
     from fairing.rss import fetch_rss
-    from fairing.embedder import enrich, load_store
+    from fairing.embedder import enrich, load_store, fan_out
     from fairing.scorer import score_articles
     from fairing.writer import write_digest, write_chinese
     from fairing.mailer import send_digest
@@ -1366,6 +1366,13 @@ def run_digest(chinese: bool = False,
     logger.info("Digest (EN) -> %s  [+%d]", path, count)
 
     mark_seen(articles)
+
+    # Fan-out: write articles to per-subscriber output files based on tag matching
+    if cfg.subscriptions:
+        logger.info("=== Fan-out to %d subscriber(s) ===", len(cfg.subscriptions))
+        fan_out_stats = fan_out(articles, cfg.subscriptions)
+        for sub_name, sub_stats in fan_out_stats.items():
+            logger.info("  %s: %d matched, %d written", sub_name, sub_stats["matched"], sub_stats["written"])
 
     # Email: optionally translate to Chinese for the digest only.
     # Translation operates on a COPY — original articles are unmodified,

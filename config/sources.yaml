@@ -244,11 +244,30 @@ rss:
     category: Business / Policy
     tags: [business, management, economics]
 
+  # ── Anthropology / Social Thought ────────────────────────────────────────────
+  - name: SAPIENS
+    url: https://www.sapiens.org/feed/
+    category: Anthropology / Society
+    tags: [anthropology, sociology, culture]
+    firecrawl_fulltext: true
+
+  - name: JSTOR Daily
+    url: https://daily.jstor.org/feed/
+    category: Humanities / History
+    tags: [history, culture, sociology, writing]
+    firecrawl_fulltext: true
+
   # ── Philosophy / Culture / Psychology ─────────────────────────────────────────
   - name: Aeon
     url: https://aeon.co/feed
     category: Philosophy / Culture
     tags: [philosophy, culture, psychology]
+    firecrawl_fulltext: true
+
+  - name: Psyche
+    url: https://psyche.co/feed
+    category: Psychology / Inner Life
+    tags: [psychology, philosophy, culture]
     firecrawl_fulltext: true
 
   - name: The Marginalian
