@@ -56,3 +56,26 @@ def test_fan_out_writes_fetch_diagnostics(tmp_path):
     assert entry["fetch_error_type"] == "blocked_by_waf"
     assert entry["fetch_block_reason"] == "akamai_edgesuite"
     assert entry["upstream_status"] == 403
+
+
+def test_fan_out_can_backfill_tags_from_source_map(tmp_path):
+    from fairing.embedder import fan_out
+
+    out = tmp_path / "feeds" / "gp" / "store.jsonl"
+    articles = [{
+        "url": "https://example.com/historical",
+        "title": "Historical",
+        "source": "Old Source",
+        "text_for_scoring": "body",
+    }]
+    subscriptions = [SimpleNamespace(name="gp", tags=["database"], output=str(out))]
+
+    stats = fan_out(
+        articles,
+        subscriptions,
+        source_tags_by_name={"Old Source": ["database", "systems"]},
+    )
+    entry = json.loads(out.read_text(encoding="utf-8").strip())
+
+    assert stats["gp"] == {"matched": 1, "written": 1}
+    assert entry["tags"] == ["database", "systems"]

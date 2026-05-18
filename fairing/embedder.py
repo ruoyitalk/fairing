@@ -75,7 +75,11 @@ def _append_store(entry: dict) -> None:
 
 # ── Fan-out to subscriber output files ────────────────────────────────────────
 
-def fan_out(articles: list[dict], subscriptions: list) -> dict:
+def fan_out(
+    articles: list[dict],
+    subscriptions: list,
+    source_tags_by_name: dict[str, list[str]] | None = None,
+) -> dict:
     """Write articles to per-subscriber output files based on tag matching.
 
     Each subscriber declares a set of tags. An article matches a subscriber
@@ -84,6 +88,8 @@ def fan_out(articles: list[dict], subscriptions: list) -> dict:
 
     @param articles: processed article list (must have 'tags' field from source)
     @param subscriptions: list of Subscription objects from config
+    @param source_tags_by_name: optional source -> tags map for backfilling
+        historical store rows that predate persisted tags.
     @return: stats dict {subscriber_name: {"matched": N, "written": N}}
     """
     from pathlib import Path
@@ -91,7 +97,10 @@ def fan_out(articles: list[dict], subscriptions: list) -> dict:
     stats = {}
     for sub in subscriptions:
         sub_tags = set(sub.tags)
-        matched = [a for a in articles if set(a.get("tags", [])) & sub_tags]
+        matched = [
+            a for a in articles
+            if set(_article_tags(a, source_tags_by_name)) & sub_tags
+        ]
         stats[sub.name] = {"matched": len(matched), "written": 0}
 
         if not matched:
@@ -123,7 +132,7 @@ def fan_out(articles: list[dict], subscriptions: list) -> dict:
                     "date":  a.get("published", ""),
                     "source": a.get("source", ""),
                     "category": a.get("category", ""),
-                    "tags":  a.get("tags", []),
+                    "tags":  _article_tags(a, source_tags_by_name),
                     "text_for_scoring": a.get("text_for_scoring", ""),
                     "fetch_engine": a.get("fetch_engine", ""),
                     "fetch_blocked": a.get("fetch_blocked", False),
@@ -140,6 +149,15 @@ def fan_out(articles: list[dict], subscriptions: list) -> dict:
                         sub.name, written, len(matched), sub.output)
 
     return stats
+
+
+def _article_tags(article: dict, source_tags_by_name: dict[str, list[str]] | None = None) -> list[str]:
+    tags = article.get("tags") or []
+    if tags:
+        return list(tags)
+    if not source_tags_by_name:
+        return []
+    return list(source_tags_by_name.get(article.get("source", ""), []))
 
 
 def enrich(articles: list[dict]) -> list[dict]:

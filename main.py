@@ -1416,7 +1416,8 @@ def run_digest(chinese: bool = False,
     # Fan-out: write articles to per-subscriber output files based on tag matching
     if cfg.subscriptions:
         logger.info("=== Fan-out to %d subscriber(s) ===", len(cfg.subscriptions))
-        fan_out_stats = fan_out(articles, cfg.subscriptions)
+        source_tags_by_name = {src.name: src.tags for src in cfg.rss_sources}
+        fan_out_stats = fan_out(articles, cfg.subscriptions, source_tags_by_name)
         for sub_name, sub_stats in fan_out_stats.items():
             logger.info("  %s: %d matched, %d written", sub_name, sub_stats["matched"], sub_stats["written"])
 
