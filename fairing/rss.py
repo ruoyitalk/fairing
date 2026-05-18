@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from time import mktime
 
 import feedparser
+import requests
 
 from .config import RssSource
 from .paths import feed_errors_file as _feed_errors_file
@@ -17,6 +18,13 @@ logger = logging.getLogger(__name__)
 _FEED_TIMEOUT = 20   # seconds per attempt
 _FEED_RETRIES = 2    # retry count after first failure
 _RETRY_DELAY  = 4    # seconds between retries
+_FEED_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; fairing-rss/1.0; "
+        "+https://github.com/ruoyitalk/fairing)"
+    ),
+    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*;q=0.8",
+}
 
 LOOKBACK_MIN_HOURS = 25
 
@@ -64,8 +72,7 @@ def _fetch_with_retry(url: str, timeout: int, retries: int, delay: int):
     last_exc = None
     for attempt in range(1, retries + 2):   # attempts = retries + 1
         try:
-            with _socket_timeout(timeout):
-                return feedparser.parse(url)
+            return _fetch_feed(url, timeout)
         except Exception as exc:
             last_exc = exc
             if attempt <= retries:
@@ -74,6 +81,16 @@ def _fetch_with_retry(url: str, timeout: int, retries: int, delay: int):
                 time.sleep(delay)
     logger.warning("all %d attempts failed: %s", retries + 1, last_exc)
     return None
+
+
+def _fetch_feed(url: str, timeout: int):
+    """Fetch a feed with explicit HTTP headers, then parse it with feedparser."""
+    resp = requests.get(url, timeout=timeout, headers=_FEED_HEADERS)
+    resp.raise_for_status()
+    return feedparser.parse(
+        resp.content,
+        response_headers={"content-type": resp.headers.get("content-type", "")},
+    )
 
 
 def _parse_entry_date(entry) -> datetime | None:

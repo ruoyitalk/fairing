@@ -66,6 +66,8 @@ def _append_store(entry: dict) -> None:
         "title":      entry.get("title", ""),
         "source":     entry.get("source", ""),
         "date":       entry.get("date", ""),
+        "category":   entry.get("category", ""),
+        "tags":       entry.get("tags", []),
     }
     with _title_index_file().open("a", encoding="utf-8") as f:
         f.write(json.dumps(title_entry, ensure_ascii=False) + "\n")
@@ -99,19 +101,21 @@ def fan_out(articles: list[dict], subscriptions: list) -> dict:
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Load existing URLs for dedup within subscriber file
+        from .state import normalize_url
         existing_urls: set[str] = set()
         if out_path.exists():
             for line in out_path.read_text(encoding="utf-8").splitlines():
                 if line.strip():
                     try:
-                        existing_urls.add(json.loads(line).get("url", ""))
+                        existing_urls.add(normalize_url(json.loads(line).get("url", "")))
                     except (json.JSONDecodeError, KeyError):
                         continue
 
         written = 0
         with out_path.open("a", encoding="utf-8") as f:
             for a in matched:
-                if a.get("url", "") in existing_urls:
+                normalized_url = normalize_url(a.get("url", ""))
+                if normalized_url in existing_urls:
                     continue
                 entry = {
                     "url":   a.get("url", ""),
@@ -121,8 +125,14 @@ def fan_out(articles: list[dict], subscriptions: list) -> dict:
                     "category": a.get("category", ""),
                     "tags":  a.get("tags", []),
                     "text_for_scoring": a.get("text_for_scoring", ""),
+                    "fetch_engine": a.get("fetch_engine", ""),
+                    "fetch_blocked": a.get("fetch_blocked", False),
+                    "fetch_error_type": a.get("fetch_error_type"),
+                    "fetch_block_reason": a.get("fetch_block_reason"),
+                    "upstream_status": a.get("upstream_status"),
                 }
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                existing_urls.add(normalized_url)
                 written += 1
         stats[sub.name]["written"] = written
         if written:
@@ -164,8 +174,16 @@ def enrich(articles: list[dict]) -> list[dict]:
                 "url":              a["url"],
                 "date":             a.get("published", ""),
                 "source":           a.get("source", ""),
+                "category":         a.get("category", ""),
+                "tags":             a.get("tags", []),
                 "title":            a.get("title", ""),
                 "text_for_scoring": a["text_for_scoring"],
+                "full_text":        a.get("full_text", ""),
+                "fetch_engine":     a.get("fetch_engine", ""),
+                "fetch_blocked":    a.get("fetch_blocked", False),
+                "fetch_error_type": a.get("fetch_error_type"),
+                "fetch_block_reason": a.get("fetch_block_reason"),
+                "upstream_status":  a.get("upstream_status"),
                 "embedding":        a["embedding"],
             })
         logger.info("Embedded %d new articles", len(to_embed))

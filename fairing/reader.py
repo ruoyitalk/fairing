@@ -10,6 +10,7 @@ Full-text reading is the responsibility of the payload consumer, not fairing.
 """
 import logging
 import os
+import requests
 import subprocess
 import sys
 from urllib.parse import urlparse
@@ -61,6 +62,21 @@ def fetch_full(url: str) -> str | None:
 
     @return: text string, or None on failure
     """
+    result = fetch_full_result(url)
+    return result.get("content") or None
+
+
+def fetch_full_result(url: str, *, max_length: int = 20000) -> dict:
+    """Fetch full article text with diagnostics.
+
+    Search Gateway is preferred when configured because it centralizes fetch
+    fallbacks and WAF classification for the homeserver stack. Firecrawl and a
+    minimal HTTP parser remain local fallbacks for non-homeserver use.
+    """
+    sg_result = _fetch_via_search_gateway(url, max_length=max_length)
+    if sg_result is not None:
+        return sg_result
+
     firecrawl_key = os.environ.get("FIRECRAWL_API_KEY", "")
     if firecrawl_key:
         try:
@@ -68,12 +84,18 @@ def fetch_full(url: str) -> str | None:
             doc  = Firecrawl(api_key=firecrawl_key).scrape(url, formats=["markdown"])
             text = (doc.markdown or "").strip()
             if text:
-                return text
+                return {
+                    "content": text[:max_length],
+                    "engine": "firecrawl",
+                    "blocked": False,
+                    "error_type": None,
+                    "block_reason": None,
+                    "upstream_status": None,
+                }
         except Exception as e:
             logger.warning("Firecrawl failed: %s — falling back to requests", e)
 
     try:
-        import requests
         r  = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         ct = r.headers.get("content-type", "")
@@ -83,10 +105,72 @@ def fetch_full(url: str) -> str | None:
                 soup = BeautifulSoup(r.text, "html.parser")
                 for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
                     tag.decompose()
-                return soup.get_text(separator="\n", strip=True)[:20000]
+                text = soup.get_text(separator="\n", strip=True)
+                return {
+                    "content": text[:max_length],
+                    "engine": "requests",
+                    "blocked": False,
+                    "error_type": None,
+                    "block_reason": None,
+                    "upstream_status": r.status_code,
+                }
             except ImportError:
                 pass
-        return r.text[:20000]
+        return {
+            "content": r.text[:max_length],
+            "engine": "requests",
+            "blocked": False,
+            "error_type": None,
+            "block_reason": None,
+            "upstream_status": r.status_code,
+        }
     except Exception as e:
         logger.warning("HTTP fetch failed: %s", e)
+        return {
+            "content": "",
+            "engine": "requests",
+            "blocked": False,
+            "error_type": "fetch_error",
+            "block_reason": str(e)[:200],
+            "upstream_status": None,
+        }
+
+
+def _fetch_via_search_gateway(url: str, *, max_length: int) -> dict | None:
+    base_url = (
+        os.environ.get("SEARCH_GATEWAY_URL")
+        or os.environ.get("SG_URL")
+        or ""
+    ).strip()
+    api_key = os.environ.get("SEARCH_GATEWAY_API_KEY", "").strip()
+    if not base_url:
+        return None
+
+    try:
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["X-API-Key"] = api_key
+        resp = requests.post(
+            base_url.rstrip("/") + "/fetch",
+            json={
+                "url": url,
+                "max_length": max_length,
+                "extract_mode": "markdown",
+                "timeout_ms": 60000,
+            },
+            headers=headers,
+            timeout=90,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "content": (data.get("content") or "")[:max_length],
+            "engine": data.get("engine") or "search-gateway",
+            "blocked": bool(data.get("blocked")),
+            "error_type": data.get("error_type"),
+            "block_reason": data.get("block_reason"),
+            "upstream_status": data.get("upstream_status"),
+        }
+    except Exception as exc:
+        logger.warning("Search Gateway fetch failed: %s — falling back locally", exc)
         return None

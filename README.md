@@ -151,7 +151,9 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 | `DATA_DIR` | No | project root | All runtime data files |
 | `BACKUP_DIR` | No | `~/Documents/fairing/data_bak` | Backup destination |
 | `NEWS_DIR` | No | `~/Documents/fairing-news` | Root output directory; daily digests → `NEWS_DIR/YYYY-WXX/`; NotebookLM → `NEWS_DIR/notebooklm/` |
-| `FIRECRAWL_API_KEY` | No | — | Firecrawl for excerpt enrichment |
+| `SEARCH_GATEWAY_URL` / `SG_URL` | No | — | Preferred full-text fetch gateway for configured sources |
+| `SEARCH_GATEWAY_API_KEY` | No | — | API key for Search Gateway when required |
+| `FIRECRAWL_API_KEY` | No | — | Fallback full-text enrichment provider |
 | `TRANSLATOR` | No | `gemini` | Translation backend: `gemini` / `openai` / `claude` |
 | `MAIL_SPLIT_N` | No | _(off)_ | Split digest email into N parts |
 | `TOP_N` | No | `20` | Articles shown in full detail in email |
@@ -167,7 +169,8 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 | `name` | — | Display name in output and labeling UI |
 | `url` | — | RSS/Atom feed URL |
 | `category` | `General` | Grouping in Obsidian notes and email |
-| `firecrawl_fulltext` | `false` | Fetch full article body via Firecrawl |
+| `tags` | `[]` | Semantic labels used by subscriber fan-out |
+| `firecrawl_fulltext` | `false` | Enrich the article with full text before embedding; Search Gateway is preferred when configured, with Firecrawl/local HTTP as fallbacks |
 
 Lookback hours are now dynamic (see [OPERATIONS.md](docs/OPERATIONS.md) — Dynamic Lookback). The `lookback_hours` field is no longer used per-source.
 

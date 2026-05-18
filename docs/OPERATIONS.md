@@ -31,15 +31,18 @@ Full pipeline run. Sequence:
 
 1. `fetch_rss()` — pull articles from all enabled sources using dynamic lookback.
 2. `filter_unseen()` — two-layer dedup: normalized URL + normalized title.
-3. Optional Firecrawl full-text fetch for configured sources.
+3. Optional source-gated full-text enrichment. When `SEARCH_GATEWAY_URL` or
+   `SG_URL` is configured, fairing calls Search Gateway `/fetch` first and
+   preserves blocked/error diagnostics; Firecrawl and local HTTP are fallbacks.
 4. `enrich()` — compute `all-MiniLM-L6-v2` embeddings; cache in `scoring_store.jsonl`.
 5. `score_articles()` — rank by personal model (if deployed) or fallback heuristic.
 6. `write_obsidian()` — write Obsidian vault `.md` (unless `--no-md`).
 7. `write_notebooklm()` — write NotebookLM source file (unless `--no-notebook`).
 8. `mark_seen()` — record URLs in `seen_urls.json`.
-9. `send_digest()` — send HTML email (unless `--no-mail`); `--chinese` translates.
-10. `run_backup()` — copy data files to `BACKUP_DIR`.
-11. `_save_pending()` — sample 3–8 articles; write `rate_pending.json`.
+9. `fan_out()` — append matching articles to subscriber JSONL outputs.
+10. `send_digest()` — send HTML email (unless `--no-mail`); `--chinese` translates.
+11. `run_backup()` — copy data files to `BACKUP_DIR`.
+12. `_save_pending()` — sample 3–8 articles; write `rate_pending.json`.
 
 | Flag | Description |
 |------|-------------|

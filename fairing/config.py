@@ -18,6 +18,7 @@ class RssSource:
     url: str
     category: str
     tags: list[str] = field(default_factory=list)
+    firecrawl_fulltext: bool = False
     # False when the source name appears in the 'disabled' list of sources.local.yaml,
     # or when the source entry itself sets enabled: false.
     enabled: bool = True
@@ -56,6 +57,7 @@ class Config:
                 url=s["url"],
                 category=s.get("category", "General"),
                 tags=s.get("tags", []),
+                firecrawl_fulltext=bool(s.get("firecrawl_fulltext", False)),
                 enabled=s.get("enabled", True) and s["name"] not in disabled,
             )
             for s in rss_entries

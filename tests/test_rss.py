@@ -171,3 +171,22 @@ def test_fetch_rss_article_has_required_fields():
     assert "published" in a
     assert a["source"]   == "MyFeed"
     assert a["category"] == "Engineering"
+
+
+def test_fetch_feed_uses_explicit_http_headers():
+    from fairing.rss import _fetch_feed
+
+    class Response:
+        content = b"<rss><channel></channel></rss>"
+        headers = {"content-type": "application/rss+xml"}
+
+        def raise_for_status(self):
+            return None
+
+    with patch("fairing.rss.requests.get", return_value=Response()) as mock_get, \
+         patch("fairing.rss.feedparser.parse") as mock_parse:
+        _fetch_feed("https://example.com/feed", timeout=7)
+
+    assert mock_get.call_args.kwargs["timeout"] == 7
+    assert "User-Agent" in mock_get.call_args.kwargs["headers"]
+    assert mock_parse.call_args.kwargs["response_headers"]["content-type"] == "application/rss+xml"

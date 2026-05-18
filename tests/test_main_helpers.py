@@ -2,6 +2,8 @@
 import numpy as np
 import sys
 import os
+from types import SimpleNamespace
+from unittest.mock import patch
 
 # Ensure project root is importable without installing the package
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -80,3 +82,58 @@ def test_nearest_labels_respects_n():
     pos, neg = _nearest_labels("url_0", store, feedback, n=2)
     assert len(pos) <= 2
     assert len(neg) <= 2
+
+
+# ── _enrich_full_text_for_scoring ─────────────────────────────────────────────
+
+def test_enrich_full_text_for_scoring_uses_source_gate():
+    from main import _enrich_full_text_for_scoring
+
+    cfg = SimpleNamespace(rss_sources=[
+        SimpleNamespace(name="Full", firecrawl_fulltext=True),
+        SimpleNamespace(name="MetaOnly", firecrawl_fulltext=False),
+    ])
+    articles = [
+        {"source": "Full", "url": "https://example.com/full"},
+        {"source": "MetaOnly", "url": "https://example.com/meta"},
+    ]
+
+    with patch("fairing.reader.fetch_full_result", return_value={
+        "content": "full body",
+        "engine": "scrapling",
+        "blocked": False,
+        "error_type": None,
+        "block_reason": None,
+        "upstream_status": 200,
+    }) as mock_fetch:
+        _enrich_full_text_for_scoring(articles, cfg)
+
+    mock_fetch.assert_called_once_with("https://example.com/full")
+    assert articles[0]["full_text"] == "full body"
+    assert articles[0]["fetch_engine"] == "scrapling"
+    assert "full_text" not in articles[1]
+
+
+def test_enrich_full_text_for_scoring_preserves_blocked_diagnostics():
+    from main import _enrich_full_text_for_scoring
+
+    cfg = SimpleNamespace(rss_sources=[
+        SimpleNamespace(name="Blocked", firecrawl_fulltext=True),
+    ])
+    articles = [{"source": "Blocked", "url": "https://example.com/blocked"}]
+
+    with patch("fairing.reader.fetch_full_result", return_value={
+        "content": "Access Denied",
+        "engine": "scrapling",
+        "blocked": True,
+        "error_type": "blocked_by_waf",
+        "block_reason": "akamai_edgesuite",
+        "upstream_status": 403,
+    }):
+        _enrich_full_text_for_scoring(articles, cfg)
+
+    assert articles[0]["fetch_blocked"] is True
+    assert articles[0]["fetch_error_type"] == "blocked_by_waf"
+    assert articles[0]["fetch_block_reason"] == "akamai_edgesuite"
+    assert articles[0]["upstream_status"] == 403
+    assert "full_text" not in articles[0]

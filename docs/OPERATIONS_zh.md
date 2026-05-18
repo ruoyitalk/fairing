@@ -31,15 +31,18 @@ rate-gate 确保同一天内不重复执行 `\r`，除非先完成 `\rate` 或�
 
 1. `fetch_rss()` — 按动态回溯窗口从所有已启用源拉取文章。
 2. `filter_unseen()` — 两层去重：规范化 URL + 规范化标题。
-3. 可选：对已配置源进行 Firecrawl 全文抓取。
+3. 可选：对已配置源进行全文补充。配置 `SEARCH_GATEWAY_URL` 或 `SG_URL`
+   时，fairing 优先调用 Search Gateway `/fetch`，并保留 blocked/error 诊断；
+   Firecrawl 与本地 HTTP 作为回退路径。
 4. `enrich()` — 计算 `all-MiniLM-L6-v2` 嵌入；缓存至 `scoring_store.jsonl`。
 5. `score_articles()` — 按个人模型（已部署时）或启发式评分排序。
 6. `write_obsidian()` — 写 Obsidian vault `.md`（除非 `--no-md`）。
 7. `write_notebooklm()` — 写 NotebookLM 源文件（除非 `--no-notebook`）。
 8. `mark_seen()` — 将 URL 记录至 `seen_urls.json`。
-9. `send_digest()` — 发送 HTML 邮件（除非 `--no-mail`）；`--chinese` 翻译邮件正文。
-10. `run_backup()` — 将数据文件备份至 `BACKUP_DIR`。
-11. `_save_pending()` — 抽取 3–8 篇，写入 `rate_pending.json`。
+9. `fan_out()` — 将命中 tags 的文章追加写入 subscriber JSONL 输出。
+10. `send_digest()` — 发送 HTML 邮件（除非 `--no-mail`）；`--chinese` 翻译邮件正文。
+11. `run_backup()` — 将数据文件备份至 `BACKUP_DIR`。
+12. `_save_pending()` — 抽取 3–8 篇，写入 `rate_pending.json`。
 
 | 参数 | 说明 |
 |------|------|

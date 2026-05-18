@@ -151,7 +151,9 @@ DATA_DIR=~/OneDrive/fairing
 | `DATA_DIR` | 否 | 项目根目录 | 所有运行时数据文件 |
 | `BACKUP_DIR` | 否 | `~/Documents/fairing/data_bak` | 备份目标目录 |
 | `NEWS_DIR` | 否 | `~/Documents/fairing-news` | 输出根目录；日摘 → `NEWS_DIR/YYYY-WXX/`；NotebookLM → `NEWS_DIR/notebooklm/` |
-| `FIRECRAWL_API_KEY` | 否 | — | Firecrawl 摘要补充抓取 |
+| `SEARCH_GATEWAY_URL` / `SG_URL` | 否 | — | 已配置源的全文抓取优先网关 |
+| `SEARCH_GATEWAY_API_KEY` | 否 | — | Search Gateway 需要认证时使用 |
+| `FIRECRAWL_API_KEY` | 否 | — | 全文补充抓取的回退服务 |
 | `TRANSLATOR` | 否 | `gemini` | 翻译后端：`gemini` / `openai` / `claude` |
 | `MAIL_SPLIT_N` | 否 | （关闭） | 将摘要邮件拆分为 N 封 |
 | `TOP_N` | 否 | `20` | 邮件中全文展示的文章数 |
@@ -167,7 +169,8 @@ DATA_DIR=~/OneDrive/fairing
 | `name` | — | 输出文件和打标界面中的显示名称 |
 | `url` | — | RSS/Atom 订阅地址 |
 | `category` | `General` | Obsidian 笔记和邮件的分组依据 |
-| `firecrawl_fulltext` | `false` | 是否对该源开启 Firecrawl 全文抓取 |
+| `tags` | `[]` | subscriber fan-out 使用的语义标签 |
+| `firecrawl_fulltext` | `false` | 是否在嵌入前补充全文；配置 Search Gateway 时优先走 `/fetch`，Firecrawl/本地 HTTP 作为回退 |
 
 回溯窗口现为动态计算（详见 [OPERATIONS.md](docs/OPERATIONS.md)——动态回溯窗口），不再使用每源 `lookback_hours` 字段。
 

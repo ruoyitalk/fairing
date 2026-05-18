@@ -837,9 +837,9 @@ def _nearest_labels(url: str, store: dict, feedback: list[dict],
 def _run_rate(pending: dict) -> None:
     """Mandatory rate mode: label n articles drawn from the full unlabeled pool.
 
-    n is set by \r based on today's article volume. Articles can be any unlabeled
+    n is set by \\r based on today's article volume. Articles can be any unlabeled
     entry — not just today's new articles. Progress is tracked by counting labels
-    saved today in feedback.jsonl, so \im and other labeling paths all count.
+    saved today in feedback.jsonl, so \\im and other labeling paths all count.
     """
     from fairing.trainer import load_feedback, save_feedback, maybe_auto_train
     from fairing.embedder import load_store
@@ -1315,6 +1315,50 @@ def _load_run_defaults() -> dict:
     }
 
 
+def _enrich_full_text_for_scoring(articles: list[dict], cfg) -> None:
+    """Attach full text to selected articles before embedding.
+
+    This is intentionally source-gated: fairing remains an RSS broker and
+    digest tool, while Search Gateway owns expensive/fragile page extraction.
+    """
+    fulltext_sources = {
+        src.name for src in cfg.rss_sources
+        if getattr(src, "firecrawl_fulltext", False)
+    }
+    if not fulltext_sources:
+        return
+
+    from fairing.reader import fetch_full_result
+
+    fetched = blocked = failed = 0
+    for article in articles:
+        if article.get("source") not in fulltext_sources:
+            continue
+        result = fetch_full_result(article.get("url", ""))
+        article["fetch_engine"] = result.get("engine", "")
+        article["fetch_blocked"] = bool(result.get("blocked"))
+        article["fetch_error_type"] = result.get("error_type")
+        article["fetch_block_reason"] = result.get("block_reason")
+        article["upstream_status"] = result.get("upstream_status")
+        content = (result.get("content") or "").strip()
+        if result.get("blocked"):
+            blocked += 1
+            logger.info(
+                "[fulltext] blocked: %s (%s)",
+                article.get("url", "")[:80],
+                result.get("block_reason") or result.get("error_type") or "blocked",
+            )
+            continue
+        if content:
+            article["full_text"] = content
+            fetched += 1
+        else:
+            failed += 1
+
+    if fetched or blocked or failed:
+        logger.info("[fulltext] fetched=%d blocked=%d failed=%d", fetched, blocked, failed)
+
+
 
 def run_digest(chinese: bool = False,
                no_mail: bool = False, force: bool = False) -> None:
@@ -1357,6 +1401,8 @@ def run_digest(chinese: bool = False,
         logger.info("No new articles after dedup.")
         return
     logger.info("Fresh: %d articles", len(articles))
+
+    _enrich_full_text_for_scoring(articles, cfg)
 
     logger.info("=== Computing embeddings ===")
     articles = enrich(articles)

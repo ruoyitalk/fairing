@@ -25,6 +25,8 @@ def test_rss_source_defaults():
     from fairing.config import RssSource
     s = RssSource(name="Test", url="https://example.com/rss", category="Tech")
     assert s.enabled is True
+    assert s.firecrawl_fulltext is False
+    assert s.tags == []
 
 
 def test_rss_source_explicit_disabled():
@@ -86,4 +88,27 @@ def test_config_source_level_enabled_false(tmp_config):
     cfg = Config()
     assert cfg.rss_sources[0].enabled is False
 
+
+def test_config_loads_tags_fulltext_and_subscriptions(tmp_config, monkeypatch, tmp_path):
+    pub, loc = tmp_config
+    subs = tmp_path / "subscriptions.yaml"
+    import fairing.config as c
+    monkeypatch.setattr(c, "_SUBSCRIPTIONS_FILE", subs)
+    _write_yaml(pub, {"rss": [{
+        "name": "Src",
+        "url": "https://s.com/rss",
+        "category": "X",
+        "tags": ["ai", "database"],
+        "firecrawl_fulltext": True,
+    }]})
+    _write_yaml(subs, {"subscribers": {
+        "gp": {"tags": ["ai"], "output": "/tmp/gp.jsonl"}
+    }})
+
+    from fairing.config import Config
+    cfg = Config()
+    assert cfg.rss_sources[0].tags == ["ai", "database"]
+    assert cfg.rss_sources[0].firecrawl_fulltext is True
+    assert cfg.subscriptions[0].name == "gp"
+    assert cfg.subscriptions[0].output == "/tmp/gp.jsonl"
 
