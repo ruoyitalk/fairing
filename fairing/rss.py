@@ -259,6 +259,18 @@ def _clear_feed_error(source_name: str) -> None:
         _save_feed_errors(errors)
 
 
+def prune_feed_errors(active_source_names: set[str]) -> dict:
+    """Remove stale errors for sources that are no longer active."""
+    errors = _load_feed_errors()
+    stale = [name for name in errors if name not in active_source_names]
+    if stale:
+        for name in stale:
+            del errors[name]
+        _save_feed_errors(errors)
+        logger.info("Pruned stale feed errors for disabled/removed sources: %s", ", ".join(sorted(stale)))
+    return errors
+
+
 def load_feed_errors() -> dict:
     """Return current feed error state (public API for display in \\l)."""
     return _load_feed_errors()

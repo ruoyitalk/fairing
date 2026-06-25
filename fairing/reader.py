@@ -17,6 +17,9 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+_SG_FETCH_TIMEOUT_MS = int(os.environ.get("FAIRING_SG_FETCH_TIMEOUT_MS", "20000"))
+_SG_CLIENT_TIMEOUT_S = float(os.environ.get("FAIRING_SG_FETCH_TIMEOUT_S", "30"))
+
 _IMAGE_EXTS  = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".avif"}
 _VIDEO_EXTS  = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v", ".flv"}
 _VIDEO_HOSTS = {"youtube.com", "youtu.be", "vimeo.com", "bilibili.com",
@@ -156,10 +159,10 @@ def _fetch_via_search_gateway(url: str, *, max_length: int) -> dict | None:
                 "url": url,
                 "max_length": max_length,
                 "extract_mode": "markdown",
-                "timeout_ms": 60000,
+                "timeout_ms": _SG_FETCH_TIMEOUT_MS,
             },
             headers=headers,
-            timeout=90,
+            timeout=_SG_CLIENT_TIMEOUT_S,
         )
         resp.raise_for_status()
         data = resp.json()

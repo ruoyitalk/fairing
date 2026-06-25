@@ -154,6 +154,27 @@ def test_fetch_rss_continues_after_failed_source():
     assert articles[0]["title"] == "Survived"
 
 
+def test_prune_feed_errors_removes_disabled_or_removed_sources(tmp_path):
+    from fairing import rss
+
+    error_file = tmp_path / "feed_errors.json"
+    error_file.write_text(
+        """
+{
+  "Active": {"consecutive_failures": 2, "last_error": "timeout"},
+  "Removed": {"consecutive_failures": 10, "last_error": "404"}
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with patch("fairing.rss._feed_errors_file", return_value=error_file):
+        result = rss.prune_feed_errors({"Active"})
+
+    assert set(result) == {"Active"}
+    assert "Removed" not in error_file.read_text(encoding="utf-8")
+
+
 # ── article structure ─────────────────────────────────────────────────────────
 
 def test_fetch_rss_article_has_required_fields():

@@ -29,14 +29,16 @@ rss:
     firecrawl_fulltext: true
 
   - name: PingCAP Blog
-    url: https://www.pingcap.com/blog/rss.xml
+    url: https://www.pingcap.com/blog/feed/
     category: Database
     tags: [database]
 
-  - name: Martin Kleppmann
-    url: https://martin.kleppmann.com/feed.xml
-    category: Database / Distributed
-    tags: [database, software_engineering]
+  # Martin Kleppmann feed URLs currently return 404 (feed.xml and atom.xml,
+  # verified 2026-06-25). Keep disabled until a working feed is available.
+  # - name: Martin Kleppmann
+  #   url: https://martin.kleppmann.com/feed.xml
+  #   category: Database / Distributed
+  #   tags: [database, software_engineering]
 
   - name: Percona Blog
     url: https://www.percona.com/blog/feed/
@@ -135,14 +137,16 @@ rss:
     tags: [ai, ai_infrastructure]
 
   - name: Gwern
-    url: https://gwern.net/atom.xml
+    url: https://gwern.net/rss.xml
     category: AI / Research
     tags: [ai, ai_research, rationality]
 
-  - name: Stephen Wolfram Writings
-    url: https://writings.stephenwolfram.com/feed/
-    category: AI / Philosophy
-    tags: [ai, ai_research, philosophy]
+  # Stephen Wolfram Writings currently fails TLS verification from the
+  # homeserver container; keep disabled until the certificate chain is fixed.
+  # - name: Stephen Wolfram Writings
+  #   url: https://writings.stephenwolfram.com/feed/
+  #   category: AI / Philosophy
+  #   tags: [ai, ai_research, philosophy]
 
   - name: Dwarkesh Podcast
     url: https://www.dwarkeshpatel.com/feed

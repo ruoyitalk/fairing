@@ -79,3 +79,26 @@ def test_fan_out_can_backfill_tags_from_source_map(tmp_path):
 
     assert stats["gp"] == {"matched": 1, "written": 1}
     assert entry["tags"] == ["database", "systems"]
+
+
+def test_load_store_skips_malformed_rows(tmp_path, monkeypatch):
+    from fairing import embedder
+
+    store_path = tmp_path / "scoring_store.jsonl"
+    good = {
+        "url": "https://example.com/good",
+        "title": "Good",
+        "text_for_scoring": "body",
+        "embedding": [0.1, 0.2],
+    }
+    store_path.write_text(
+        json.dumps(good, ensure_ascii=False) + "\n"
+        + '{"url": "https://example.com/partial", "title": "Partial"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(embedder, "_scoring_store_file", lambda: store_path)
+
+    store = embedder.load_store()
+
+    assert list(store) == ["https://example.com/good"]
+    assert store["https://example.com/good"]["title"] == "Good"

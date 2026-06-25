@@ -47,10 +47,22 @@ def _load_store() -> dict[str, dict]:
     if not _scoring_store_file().exists():
         return {}
     store = {}
-    for line in _scoring_store_file().read_text(encoding="utf-8").splitlines():
+    bad_lines = 0
+    for line_no, line in enumerate(_scoring_store_file().read_text(encoding="utf-8").splitlines(), 1):
         if line.strip():
-            entry = json.loads(line)
-            store[entry["url"]] = entry
+            try:
+                entry = json.loads(line)
+                store[entry["url"]] = entry
+            except (json.JSONDecodeError, KeyError) as exc:
+                bad_lines += 1
+                logger.warning(
+                    "Skipping malformed scoring store row %s:%d: %s",
+                    _scoring_store_file(),
+                    line_no,
+                    exc,
+                )
+    if bad_lines:
+        logger.warning("Skipped %d malformed scoring store row(s)", bad_lines)
     return store
 
 

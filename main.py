@@ -13,6 +13,7 @@ import os
 import random
 import re
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -117,6 +118,35 @@ _TZ_BEIJING = timezone(timedelta(hours=8))
 def _today_beijing() -> str:
     """Return today's date string in Beijing time (UTC+8)."""
     return datetime.now(_TZ_BEIJING).date().isoformat()
+
+
+def _acquire_run_lock():
+    """Hold a process-level lock so scheduled and manual runs cannot overlap."""
+    import fcntl
+    from fairing.paths import data_path
+
+    lock_path = data_path("fairing_run.lock")
+    handle = lock_path.open("w", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        logger.warning("Another fairing run is already active; skipping this run")
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"pid={os.getpid()} started_at={datetime.now(_TZ_BEIJING).isoformat()}\n")
+    handle.flush()
+    return handle
+
+
+def _release_run_lock(handle) -> None:
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
 
 
 # ── dynamic lookback ──────────────────────────────────────────────────────────
@@ -475,8 +505,13 @@ def _show_log() -> None:
             ))
 
     # ── 订阅源失败警告 ────────────────────────────────────────────────────────
-    from fairing.rss import load_feed_errors
-    errors = load_feed_errors()
+    from fairing.rss import load_feed_errors, prune_feed_errors
+    try:
+        from fairing.config import Config as _FeedConfig
+        active_sources = {s.name for s in _FeedConfig().rss_sources if s.enabled}
+        errors = prune_feed_errors(active_sources)
+    except Exception:
+        errors = load_feed_errors()
     troubled = {k: v for k, v in errors.items() if v.get("consecutive_failures", 0) >= 5}
     if troubled:
         et = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD, padding=(0, 1))
@@ -1331,9 +1366,39 @@ def _enrich_full_text_for_scoring(articles: list[dict], cfg) -> None:
     from fairing.reader import fetch_full_result
 
     fetched = blocked = failed = 0
-    for article in articles:
-        if article.get("source") not in fulltext_sources:
-            continue
+    candidates = [
+        article for article in articles
+        if article.get("source") in fulltext_sources
+    ]
+    if not candidates:
+        return
+
+    max_articles = int(os.environ.get("FAIRING_FULLTEXT_MAX_ARTICLES", "120"))
+    max_seconds = float(os.environ.get("FAIRING_FULLTEXT_MAX_SECONDS", "900"))
+    started = time.monotonic()
+    processed = 0
+    logger.info(
+        "[fulltext] candidates=%d max_articles=%d max_seconds=%.0f",
+        len(candidates),
+        max_articles,
+        max_seconds,
+    )
+
+    for article in candidates:
+        if processed >= max_articles:
+            logger.info("[fulltext] article budget reached: %d/%d", processed, len(candidates))
+            break
+        elapsed = time.monotonic() - started
+        if elapsed >= max_seconds:
+            logger.info(
+                "[fulltext] time budget reached after %.1fs: processed=%d/%d",
+                elapsed,
+                processed,
+                len(candidates),
+            )
+            break
+
+        processed += 1
         result = fetch_full_result(article.get("url", ""))
         article["fetch_engine"] = result.get("engine", "")
         article["fetch_blocked"] = bool(result.get("blocked"))
@@ -1355,13 +1420,44 @@ def _enrich_full_text_for_scoring(articles: list[dict], cfg) -> None:
         else:
             failed += 1
 
-    if fetched or blocked or failed:
-        logger.info("[fulltext] fetched=%d blocked=%d failed=%d", fetched, blocked, failed)
+        if processed % 10 == 0:
+            logger.info(
+                "[fulltext] progress processed=%d/%d fetched=%d blocked=%d failed=%d",
+                processed,
+                len(candidates),
+                fetched,
+                blocked,
+                failed,
+            )
+
+    if processed or fetched or blocked or failed:
+        logger.info(
+            "[fulltext] processed=%d/%d fetched=%d blocked=%d failed=%d",
+            processed,
+            len(candidates),
+            fetched,
+            blocked,
+            failed,
+        )
 
 
 
 def run_digest(chinese: bool = False,
                no_mail: bool = False, force: bool = False) -> None:
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+
+    lock_handle = _acquire_run_lock()
+    if lock_handle is None:
+        return
+    try:
+        return _run_digest_locked(chinese=chinese, no_mail=no_mail, force=force)
+    finally:
+        _release_run_lock(lock_handle)
+
+
+def _run_digest_locked(chinese: bool = False,
+                       no_mail: bool = False, force: bool = False) -> None:
     """Fetch, score, and deliver the daily digest end-to-end.
 
     @param chinese: translate email to Chinese (MD stays English)
@@ -1379,7 +1475,7 @@ def run_digest(chinese: bool = False,
         logger.info("Dynamic lookback: %.1f h since last run (extending all windows)", elapsed_hours)
 
     from fairing.config import Config
-    from fairing.rss import fetch_rss
+    from fairing.rss import fetch_rss, prune_feed_errors
     from fairing.embedder import enrich, load_store, fan_out
     from fairing.scorer import score_articles
     from fairing.writer import write_digest, write_chinese
@@ -1388,6 +1484,7 @@ def run_digest(chinese: bool = False,
 
     cfg        = Config()
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    prune_feed_errors({src.name for src in cfg.rss_sources if src.enabled})
 
     logger.info("=== Fetching RSS feeds ===")
     articles = fetch_rss(cfg.rss_sources, min_lookback_hours=elapsed_hours)
