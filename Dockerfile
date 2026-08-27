@@ -18,7 +18,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.lock .
-RUN pip install "torch==2.6.0+cu124" --extra-index-url "$PYTORCH_INDEX_URL" \
+RUN pip install "torch==2.6.0+cu124" \
+        --index-url "https://pypi.tuna.tsinghua.edu.cn/simple/" \
+        --extra-index-url "$PYTORCH_INDEX_URL" \
     && pip install -r requirements.lock
 
 LABEL org.opencontainers.image.source="$SOURCE_URL" \
