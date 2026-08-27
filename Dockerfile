@@ -1,6 +1,5 @@
 FROM python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17
 
-ARG SOURCE_REVISION="unknown"
 ARG SOURCE_URL="https://github.com/ruoyitalk/fairing"
 
 WORKDIR /app
@@ -23,6 +22,9 @@ RUN pip install \
     && pip install -r requirements.lock \
         --index-url "https://pypi.tuna.tsinghua.edu.cn/simple/"
 
+# Keep the revision-only argument below dependency installation so a new
+# source commit does not invalidate the large CUDA/PyTorch dependency layer.
+ARG SOURCE_REVISION="unknown"
 LABEL org.opencontainers.image.source="$SOURCE_URL" \
       org.opencontainers.image.revision="$SOURCE_REVISION"
 
