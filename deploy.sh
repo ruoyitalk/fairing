@@ -44,7 +44,9 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
   test -r '$REMOTE_ENV_FILE'
   cd '$REMOTE_DIR'
   docker build --build-arg SOURCE_REVISION='$SOURCE_REVISION' -t '$IMAGE' .
-  docker run --rm -v '$REMOTE_DIR':/source:ro -w /source '$IMAGE' pytest -q
+  # Test the built artifact itself. Mounting the mutable checkout here could
+  # validate code that is not actually present in the image.
+  docker run --rm '$IMAGE' pytest -q
   previous_image=\"\$(docker inspect -f '{{.Config.Image}}' fairing 2>/dev/null || true)\"
   run_fairing() {
     local image=\"\$1\"
