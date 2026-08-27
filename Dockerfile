@@ -28,6 +28,7 @@ LABEL org.opencontainers.image.source="$SOURCE_URL" \
 
 COPY fairing/ ./fairing/
 COPY config/ ./config/
+COPY tests/ ./tests/
 COPY main.py streamlit_app.py ./
 
 EXPOSE 8501
