@@ -1,0 +1,16 @@
+.git
+.env
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.scoring_store.jsonl
+seen_urls.json
+scoring_store.jsonl
+title_index.jsonl
+rate_pending.json
+payload_queue.json
+feed_errors.json
+last_run_time
+config/sources.local.yaml
+tests

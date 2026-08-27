@@ -1,0 +1,13 @@
+colorama==0.4.6
+feedparser==6.0.14
+firecrawl-py==4.40.0
+google-genai==2.20.0
+joblib==1.5.3
+python-dotenv==1.2.3
+pytest==9.0.2
+PyYAML==6.0.3
+requests==2.34.2
+rich==15.0.0
+scikit-learn==1.9.0
+sentence-transformers==6.0.0
+streamlit==1.62.0

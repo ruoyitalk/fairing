@@ -1,0 +1,35 @@
+FROM python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17
+
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu124"
+ARG SOURCE_REVISION="unknown"
+ARG SOURCE_URL="https://github.com/ruoyitalk/fairing"
+
+WORKDIR /app
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_SERVER_PORT=8501 \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.lock .
+RUN pip install "torch==2.6.0+cu124" --extra-index-url "$PYTORCH_INDEX_URL" \
+    && pip install -r requirements.lock
+
+LABEL org.opencontainers.image.source="$SOURCE_URL" \
+      org.opencontainers.image.revision="$SOURCE_REVISION"
+
+COPY fairing/ ./fairing/
+COPY config/ ./config/
+COPY main.py streamlit_app.py ./
+
+EXPOSE 8501
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8501/_stcore/health || exit 1
+
+CMD ["streamlit", "run", "streamlit_app.py"]
