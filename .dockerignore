@@ -13,4 +13,3 @@ payload_queue.json
 feed_errors.json
 last_run_time
 config/sources.local.yaml
-tests
