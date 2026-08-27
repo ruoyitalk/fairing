@@ -20,7 +20,8 @@ COPY requirements.lock .
 RUN pip install \
         "https://pypi.tuna.tsinghua.edu.cn/packages/e5/35/0c52d708144c2deb595cd22819a609f78fdd699b95ff6f0ebcd456e3c7c1/torch-2.6.0-cp312-cp312-manylinux1_x86_64.whl#sha256=2bb8987f3bb1ef2675897034402373ddfc8f5ef0e156e2d8cfc47cacafdda4a9" \
         --index-url "https://pypi.tuna.tsinghua.edu.cn/simple/" \
-    && pip install -r requirements.lock
+    && pip install -r requirements.lock \
+        --index-url "https://pypi.tuna.tsinghua.edu.cn/simple/"
 
 LABEL org.opencontainers.image.source="$SOURCE_URL" \
       org.opencontainers.image.revision="$SOURCE_REVISION"
