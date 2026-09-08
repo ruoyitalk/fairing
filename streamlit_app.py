@@ -26,6 +26,13 @@ from fairing.paths import (
     feed_errors_file,
 )
 from fairing.state import normalize_url
+from fairing.web_auth import (
+    google_user_allowed,
+    homeserver_key_matches,
+    parse_allowed_emails,
+    read_secret,
+    user_email,
+)
 
 _TZ_BJT = timezone(timedelta(hours=8))
 
@@ -36,6 +43,52 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+# Authentication terminates in Fairing. Google and the Homeserver recovery key
+# share the gate without copying secrets into this repository.
+_SECRET_DIR = Path("/run/homeserver-secrets")
+try:
+    _allowed_emails = parse_allowed_emails(
+        read_secret(_SECRET_DIR / "google_allowed_emails")
+    )
+    _homeserver_key = read_secret(_SECRET_DIR / "context_password")
+except (OSError, ValueError):
+    st.error("认证配置不可用，请检查服务器密钥挂载。")
+    st.stop()
+
+_local_authenticated = bool(st.session_state.get("fairing_homeserver_authenticated"))
+_google_authenticated = bool(
+    getattr(st.user, "is_logged_in", False)
+    and google_user_allowed(st.user, _allowed_emails)
+)
+
+if not (_local_authenticated or _google_authenticated):
+    st.title("ruoyi_talk")
+    st.caption("Fairing · RSS 智能摘要")
+
+    if getattr(st.user, "is_logged_in", False):
+        email = user_email(st.user)
+        st.error(f"Google 账号 {email or '未知账号'} 不在允许列表中。")
+        if st.button("退出 Google 账号"):
+            st.logout()
+    else:
+        google_col, key_col = st.columns(2)
+        with google_col:
+            st.subheader("Google 登录")
+            st.write("使用允许列表中的 Google 账号。")
+            if st.button("使用 Google 登录", type="primary", use_container_width=True):
+                st.login("google")
+        with key_col:
+            st.subheader("Homeserver 密钥")
+            submitted_key = st.text_input("密钥", type="password")
+            if st.button("使用密钥登录", use_container_width=True):
+                if homeserver_key_matches(submitted_key, _homeserver_key):
+                    st.session_state["fairing_homeserver_authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("密钥不正确。")
+    st.stop()
 
 # ── cached file readers (TTL 30s — fast enough for interactive use) ────────────
 @st.cache_data(ttl=30)
@@ -155,6 +208,17 @@ with st.sidebar:
     lrf = last_run_time_file()
     last_run = lrf.read_text(encoding="utf-8").strip() if lrf.exists() else ""
     st.caption(f"上次运行：{_format_time(last_run) if last_run else '从未'}")
+
+    st.divider()
+    if _google_authenticated:
+        st.caption(f"Google：{user_email(st.user)}")
+        if st.button("退出登录", use_container_width=True):
+            st.logout()
+    else:
+        st.caption("Homeserver 密钥登录")
+        if st.button("退出登录", use_container_width=True):
+            st.session_state.pop("fairing_homeserver_authenticated", None)
+            st.rerun()
 
     st.divider()
     page = st.radio(

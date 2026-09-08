@@ -57,8 +57,10 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       --security-opt no-new-privileges:true \\
       --network docker_proxy \\
       --gpus all \\
-      -p 8501:8501 \\
+      -p 127.0.0.1:8501:8501 \\
       --env-file '$REMOTE_ENV_FILE' \\
+      -e FAIRING_SECRET_DIR=/run/homeserver-secrets \\
+      -e FAIRING_OIDC_REDIRECT_URI=https://ruoyi.net.cn/oauth2callback \\
       -e DATA_DIR=/data/fairing \\
       -e FAIRING_ROOT=/fairing \\
       -e PAYLOAD_ROOT=/payload \\
@@ -71,6 +73,7 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       -v /data/ruoyi_download:/data/ruoyi_download \\
       -v /data/data_bak:/data/data_bak \\
       -v /data/data_bak/payload:/data/payload \\
+      -v /opt/docker/homeserver-context/secrets:/run/homeserver-secrets:ro \\
       -v '$REMOTE_DIR':/fairing:ro \\
       -v /opt/docker/payload_git:/payload:ro \\
       -v /opt/docker/fairing/config:/app/config:ro \\

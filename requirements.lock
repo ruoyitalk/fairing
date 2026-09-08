@@ -1,3 +1,4 @@
+Authlib==1.6.6
 colorama==0.4.6
 feedparser==6.0.14
 firecrawl-py==4.40.0

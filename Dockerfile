@@ -31,10 +31,11 @@ LABEL org.opencontainers.image.source="$SOURCE_URL" \
 COPY fairing/ ./fairing/
 COPY config/ ./config/
 COPY tests/ ./tests/
-COPY main.py streamlit_app.py ./
+COPY main.py streamlit_app.py docker-entrypoint.sh ./
+RUN chmod 0755 /app/docker-entrypoint.sh
 
 EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8501/_stcore/health || exit 1
 
-CMD ["streamlit", "run", "streamlit_app.py"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
