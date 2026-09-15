@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, os.environ.get("FAIRING_APP_ROOT", "/app"))
 
 from fairing.config import Config
 from fairing.embedder import _get_model
