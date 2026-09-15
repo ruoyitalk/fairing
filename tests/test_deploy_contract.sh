@@ -37,6 +37,16 @@ if grep -Fqi -- 'n8n' "$SCRIPT_DIR/../deploy/sync-fairing-cron"; then
   exit 1
 fi
 
+if ! grep -Fqx 'docker exec "$containers" python /fairing/main.py run --no-mail' \
+  "$SCRIPT_DIR/../deploy/fairing-daily-run"; then
+  printf 'Fairing daily run must respect the label gate and suppress legacy mail\n' >&2
+  exit 1
+fi
+if grep -Fq -- '--force' "$SCRIPT_DIR/../deploy/fairing-daily-run"; then
+  printf 'Fairing daily run must not bypass the label gate\n' >&2
+  exit 1
+fi
+
 test_dir=$(mktemp -d /tmp/fairing-cron-contract.XXXXXX)
 trap 'rm -rf "$test_dir"' EXIT
 printf '10:00\n' >"$test_dir/cron-time"

@@ -36,8 +36,11 @@ Storage:
   .personal_model.pkl     — gitignored (regenerable)
   .personal_scaler.pkl    — gitignored (regenerable)
 """
+import fcntl
 import json
 import logging
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -75,6 +78,19 @@ class TrainResult:
 
 # ── feedback I/O ──────────────────────────────────────────────────────────────
 
+@contextmanager
+def _feedback_lock(*, exclusive: bool):
+    feedback = _ff()
+    lock_file = feedback.with_name(feedback.name + ".lock")
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with lock_file.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def load_feedback() -> list[dict]:
     """Load feedback, deduplicating by URL and keeping the last entry per URL.
 
@@ -82,10 +98,10 @@ def load_feedback() -> list[dict]:
     with the same URL. This function returns only the latest entry per URL so
     the trainer always sees the current label.
     """
-    _ff().parent.mkdir(parents=True, exist_ok=True)
-    if not _ff().exists():
-        return []
-    raw = [json.loads(l) for l in _ff().read_text(encoding="utf-8").splitlines() if l.strip()]
+    with _feedback_lock(exclusive=False):
+        if not _ff().exists():
+            return []
+        raw = [json.loads(l) for l in _ff().read_text(encoding="utf-8").splitlines() if l.strip()]
     deduped: dict[str, dict] = {}
     for entry in raw:
         deduped[entry["url"]] = entry
@@ -93,9 +109,11 @@ def load_feedback() -> list[dict]:
 
 
 def save_feedback(entry: dict) -> None:
-    _ff().parent.mkdir(parents=True, exist_ok=True)
-    with _ff().open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    with _feedback_lock(exclusive=True):
+        with _ff().open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
 
 # ── decay ─────────────────────────────────────────────────────────────────────

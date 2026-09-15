@@ -28,9 +28,13 @@ JSON array, newest-queued first::
 payload reads this file, maintains its own "already downloaded" state,
 and never writes back to fairing.
 """
+import fcntl
 import hashlib
 import json
 import logging
+import os
+import tempfile
+from contextlib import contextmanager
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -54,21 +58,63 @@ def article_id_for(url: str) -> str:
 
 # ── Queue I/O ──────────────────────────────────────────────────────────────────
 
-def load_payload_queue() -> list[dict]:
-    """Load the current payload queue from DATA_DIR."""
+@contextmanager
+def _queue_lock(*, exclusive: bool):
+    queue_file = payload_queue_file()
+    lock_file = queue_file.with_name(queue_file.name + ".lock")
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with lock_file.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _load_payload_queue_unlocked() -> list[dict]:
     f = payload_queue_file()
     if not f.exists():
         return []
     try:
-        return json.loads(f.read_text(encoding="utf-8"))
+        value = json.loads(f.read_text(encoding="utf-8"))
+        return value if isinstance(value, list) else []
     except (json.JSONDecodeError, OSError):
         return []
 
 
-def _write_queue(queue: list[dict]) -> None:
-    payload_queue_file().write_text(
-        json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8"
+def _write_queue_unlocked(queue: list[dict]) -> None:
+    destination = payload_queue_file()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
     )
+    temporary = os.fdopen(descriptor, "w", encoding="utf-8")
+    try:
+        json.dump(queue, temporary, ensure_ascii=False, indent=2)
+        temporary.write("\n")
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        temporary.close()
+        os.replace(temporary_name, destination)
+    except Exception:
+        temporary.close()
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def load_payload_queue() -> list[dict]:
+    """Load the current payload queue from DATA_DIR."""
+    with _queue_lock(exclusive=False):
+        return _load_payload_queue_unlocked()
+
+
+def write_payload_queue(queue: list[dict]) -> None:
+    """Atomically replace the queue while excluding concurrent writers."""
+    with _queue_lock(exclusive=True):
+        _write_queue_unlocked(queue)
 
 
 def add_to_payload_queue(article: dict) -> bool:
@@ -81,30 +127,32 @@ def add_to_payload_queue(article: dict) -> bool:
     """
     url  = article.get("url", "")
     aid  = article_id_for(url)
-    queue = load_payload_queue()
-    if any(e["article_id"] == aid for e in queue):
-        logger.debug("Already in payload queue: %s", aid)
-        return False
-    queue.insert(0, {
-        "article_id":  aid,
-        "url":         url,
-        "title":       article.get("title", ""),
-        "source":      article.get("source", ""),
-        "queued_date": today_beijing(),
-    })
-    _write_queue(queue)
+    with _queue_lock(exclusive=True):
+        queue = _load_payload_queue_unlocked()
+        if any(e.get("article_id") == aid for e in queue):
+            logger.debug("Already in payload queue: %s", aid)
+            return False
+        queue.insert(0, {
+            "article_id":  aid,
+            "url":         url,
+            "title":       article.get("title", ""),
+            "source":      article.get("source", ""),
+            "queued_date": today_beijing(),
+        })
+        _write_queue_unlocked(queue)
     logger.info("Added to payload queue: %s — %s", aid, article.get("title", "")[:60])
     return True
 
 
 def remove_from_payload_queue(article_id: str) -> bool:
     """Remove an entry from the payload queue by article_id."""
-    queue   = load_payload_queue()
-    updated = [e for e in queue if e["article_id"] != article_id]
-    if len(updated) == len(queue):
-        return False
-    _write_queue(updated)
-    return True
+    with _queue_lock(exclusive=True):
+        queue = _load_payload_queue_unlocked()
+        updated = [e for e in queue if e.get("article_id") != article_id]
+        if len(updated) == len(queue):
+            return False
+        _write_queue_unlocked(updated)
+        return True
 
 
 # ── Search pool ────────────────────────────────────────────────────────────────

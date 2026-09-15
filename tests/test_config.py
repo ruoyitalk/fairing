@@ -112,3 +112,18 @@ def test_config_loads_tags_fulltext_and_subscriptions(tmp_config, monkeypatch, t
     assert cfg.subscriptions[0].name == "gp"
     assert cfg.subscriptions[0].output == "/tmp/gp.jsonl"
 
+
+def test_config_skips_disabled_subscriptions(tmp_config, monkeypatch, tmp_path):
+    pub, _ = tmp_config
+    subs = tmp_path / "subscriptions.yaml"
+    import fairing.config as c
+    monkeypatch.setattr(c, "_SUBSCRIPTIONS_FILE", subs)
+    _write_yaml(pub, {"rss": []})
+    _write_yaml(subs, {"subscribers": {
+        "retired": {"enabled": False, "tags": ["ai"], "output": "/tmp/retired.jsonl"},
+        "active": {"tags": ["database"], "output": "/tmp/active.jsonl"},
+    }})
+
+    from fairing.config import Config
+    cfg = Config()
+    assert [sub.name for sub in cfg.subscriptions] == ["active"]

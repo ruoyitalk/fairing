@@ -1786,9 +1786,9 @@ class Shell(cmd.Cmd):
     payload           list queued articles
     payload clear     empty the payload queue"""
         _clear()
-        from fairing.export import load_payload_queue, _write_queue
+        from fairing.export import load_payload_queue, write_payload_queue
         if line.strip() == "clear":
-            _write_queue([])
+            write_payload_queue([])
             console.print(Panel("[yellow]payload 队列已清空[/yellow]", border_style="yellow"))
             return
         queue = load_payload_queue()

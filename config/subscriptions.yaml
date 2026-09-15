@@ -13,6 +13,9 @@
 
 subscribers:
   gp:
+    # No active Group Portrait consumer remains. Keep the contract as history,
+    # but do not grow the legacy JSONL until a consumer is explicitly restored.
+    enabled: false
     tags:
       - database
       - ai
@@ -42,6 +45,9 @@ subscribers:
     output: /data/fairing/feeds/gp/store.jsonl
 
   ruoyi_talk:
+    # The old ruoyi_talk store has no active reader. A future inbox must opt in
+    # through a reviewed consumer contract instead of inheriting this fan-out.
+    enabled: false
     tags:
       - database
       - ai

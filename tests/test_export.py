@@ -45,6 +45,15 @@ def test_load_returns_empty_when_no_file(monkeypatch, tmp_path):
     assert load_payload_queue() == []
 
 
+def test_atomic_queue_replace_leaves_no_temporary_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.export import load_payload_queue, write_payload_queue
+    expected = [{"article_id": "a" * 16, "url": "https://example.com/a"}]
+    write_payload_queue(expected)
+    assert load_payload_queue() == expected
+    assert not list(tmp_path.glob(".payload_queue.json.*.tmp"))
+
+
 # ── add_to_payload_queue ───────────────────────────────────────────────────────
 
 def test_add_writes_file(monkeypatch, tmp_path):

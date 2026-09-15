@@ -77,6 +77,7 @@ class Subscription:
     name: str
     tags: list[str]
     output: str
+    enabled: bool = True
 
 
 def _load_subscriptions() -> list[Subscription]:
@@ -85,9 +86,12 @@ def _load_subscriptions() -> list[Subscription]:
     raw = yaml.safe_load(_SUBSCRIPTIONS_FILE.read_text(encoding="utf-8")) or {}
     subs = []
     for name, cfg in raw.get("subscribers", {}).items():
+        if not cfg.get("enabled", True):
+            continue
         subs.append(Subscription(
             name=name,
             tags=cfg.get("tags", []),
             output=cfg.get("output", ""),
+            enabled=True,
         ))
     return subs
