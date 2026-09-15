@@ -10,7 +10,11 @@ def active_feed_errors(errors: dict) -> list[tuple[str, int]]:
     """Return only sources with a positive consecutive-failure count."""
     active = []
     for source, info in errors.items():
-        consecutive = info.get("consecutive", 0) if isinstance(info, dict) else 0
+        consecutive = (
+            info.get("consecutive_failures", info.get("consecutive", 0))
+            if isinstance(info, dict)
+            else 0
+        )
         if isinstance(consecutive, int) and consecutive > 0:
             active.append((source, consecutive))
     return active

@@ -7,10 +7,11 @@ def test_active_feed_errors_ignores_recovered_sources():
     from fairing.web_actions import active_feed_errors
 
     assert active_feed_errors({
-        "healthy": {"consecutive": 0},
-        "broken": {"consecutive": 3},
-        "legacy": "invalid",
-    }) == [("broken", 3)]
+        "healthy": {"consecutive_failures": 0},
+        "broken": {"consecutive_failures": 3},
+        "legacy_broken": {"consecutive": 2},
+        "invalid": "invalid",
+    }) == [("broken", 3), ("legacy_broken", 2)]
 
 
 def test_record_feedback_uses_cli_training_schema(monkeypatch, tmp_path):
