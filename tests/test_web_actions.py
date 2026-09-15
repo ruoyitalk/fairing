@@ -3,6 +3,16 @@ from pathlib import Path
 import pytest
 
 
+def test_active_feed_errors_ignores_recovered_sources():
+    from fairing.web_actions import active_feed_errors
+
+    assert active_feed_errors({
+        "healthy": {"consecutive": 0},
+        "broken": {"consecutive": 3},
+        "legacy": "invalid",
+    }) == [("broken", 3)]
+
+
 def test_record_feedback_uses_cli_training_schema(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from fairing.trainer import load_feedback

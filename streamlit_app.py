@@ -30,7 +30,7 @@ from fairing.export import (
     write_payload_queue,
 )
 from fairing.trainer import load_feedback
-from fairing.web_actions import record_feedback
+from fairing.web_actions import active_feed_errors, record_feedback
 from fairing.web_auth import (
     google_user_allowed,
     homeserver_key_matches,
@@ -268,9 +268,9 @@ if page == "🏠 仪表板":
     with col_b:
         st.subheader("⚠️ Feed 状态")
         errors = _load_json(feed_errors_file(), {})
-        if errors:
-            for src, info in list(errors.items())[:5]:
-                consecutive = info.get("consecutive", 0) if isinstance(info, dict) else 0
+        active_errors = active_feed_errors(errors) if isinstance(errors, dict) else []
+        if active_errors:
+            for src, consecutive in active_errors[:5]:
                 st.warning(f"**{src}**: 连续失败 {consecutive} 次")
         else:
             st.success("所有 Feed 正常")
