@@ -6,9 +6,14 @@ readonly SCRIPT_DIR
 readonly DEPLOY_SCRIPT="$SCRIPT_DIR/../deploy.sh"
 
 for contract in \
+  '--user 1000:1000' \
+  '--group-add 0' \
+  '--group-add 44' \
+  '--group-add 993' \
+  '--group-add 65532' \
   '--read-only' \
-  '--tmpfs /run/fairing-auth:rw,noexec,nosuid,size=1m,mode=0700' \
-  '--tmpfs /tmp:rw,noexec,nosuid,size=512m,mode=1777' \
+  '--tmpfs /run/fairing-auth:rw,noexec,nosuid,size=1m,mode=0700,uid=1000,gid=1000' \
+  '--tmpfs /tmp:rw,noexec,nosuid,size=512m,mode=1777,uid=1000,gid=1000' \
   '--memory 4g' \
   '--memory-reservation 3g' \
   '--memory-swap 4g' \
@@ -23,6 +28,24 @@ for contract in \
 done
 
 for contract in \
+  '-e HOME=/tmp/fairing-home' \
+  '-e HF_HOME=/cache/huggingface' \
+  '-e HF_HUB_OFFLINE=1' \
+  '-v /opt/docker/hf_cache:/cache/huggingface:ro'; do
+  if ! grep -Fq -- "$contract" "$DEPLOY_SCRIPT"; then
+    printf 'Fairing deploy script is missing non-root runtime contract: %s\n' "$contract" >&2
+    exit 1
+  fi
+done
+
+if ! grep -Fq 'USER 1000:1000' "$SCRIPT_DIR/../Dockerfile"; then
+  printf 'Fairing image must declare the non-root runtime user\n' >&2
+  exit 1
+fi
+
+for contract in \
+  "install -o root -g root -m 0644 '\$REMOTE_DIR/config/sources.yaml' /opt/docker/fairing/config/sources.yaml" \
+  "install -o root -g root -m 0644 '\$REMOTE_DIR/config/subscriptions.yaml' /opt/docker/fairing/config/subscriptions.yaml" \
   "install -o root -g root -m 0755 '\$REMOTE_DIR/deploy/fairing-daily-run' /usr/local/sbin/fairing-daily-run" \
   "install -o root -g root -m 0755 '\$REMOTE_DIR/deploy/sync-fairing-cron' /usr/local/sbin/sync-fairing-cron" \
   '* * * * * /usr/local/sbin/sync-fairing-cron'; do
@@ -31,6 +54,12 @@ for contract in \
     exit 1
   fi
 done
+
+if ! grep -Fq 'docker exec fairing python /fairing/deploy/fairing-runtime-smoke.py' \
+  "$DEPLOY_SCRIPT"; then
+  printf 'Fairing deploy must run the production data and model smoke probe\n' >&2
+  exit 1
+fi
 
 if grep -Fqi -- 'n8n' "$SCRIPT_DIR/../deploy/sync-fairing-cron"; then
   printf 'Fairing cron sync must not mutate the retired n8n scheduler\n' >&2

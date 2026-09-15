@@ -8,6 +8,7 @@ fi
 secret_dir="${FAIRING_SECRET_DIR:-/run/homeserver-secrets}"
 runtime_dir="${FAIRING_AUTH_RUNTIME_DIR:-/run/fairing-auth}"
 redirect_uri="${FAIRING_OIDC_REDIRECT_URI:-https://ruoyi.net.cn/oauth2callback}"
+home_dir="${HOME:-/tmp/fairing-home}"
 
 for name in google_client_id google_client_secret context_session_secret; do
   test -s "$secret_dir/$name" || {
@@ -16,6 +17,7 @@ for name in google_client_id google_client_secret context_session_secret; do
   }
 done
 
+install -d -m 0700 "$home_dir"
 install -d -m 0700 "$runtime_dir"
 umask 077
 {

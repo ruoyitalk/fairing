@@ -13,6 +13,8 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
+    && groupadd --gid 1000 fairing \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin fairing \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.lock .
@@ -33,6 +35,9 @@ COPY config/ ./config/
 COPY tests/ ./tests/
 COPY main.py streamlit_app.py docker-entrypoint.sh ./
 RUN chmod 0755 /app/docker-entrypoint.sh
+
+ENV HOME=/tmp/fairing-home
+USER 1000:1000
 
 EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \

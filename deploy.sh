@@ -48,14 +48,26 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
   # validate code that is not actually present in the image.
   docker run --rm '$IMAGE' pytest -q
   previous_image=\"\$(docker inspect -f '{{.Config.Image}}' fairing 2>/dev/null || true)\"
+  current_week=\"\$(date +%G-W%V)\"
+  install -d -o root -g root -m 2775 /data/news \"/data/news/\$current_week\"
+  if [[ -f \"/data/news/\$current_week/\$(date +%F).md\" ]]; then
+    chmod 0664 \"/data/news/\$current_week/\$(date +%F).md\"
+  fi
+  install -o root -g root -m 0644 '$REMOTE_DIR/config/sources.yaml' /opt/docker/fairing/config/sources.yaml
+  install -o root -g root -m 0644 '$REMOTE_DIR/config/subscriptions.yaml' /opt/docker/fairing/config/subscriptions.yaml
   run_fairing() {
     local image=\"\$1\"
     docker run -d \\
       --name fairing \\
       --restart unless-stopped \\
+      --user 1000:1000 \\
+      --group-add 0 \\
+      --group-add 44 \\
+      --group-add 993 \\
+      --group-add 65532 \\
       --read-only \\
-      --tmpfs /run/fairing-auth:rw,noexec,nosuid,size=1m,mode=0700 \\
-      --tmpfs /tmp:rw,noexec,nosuid,size=512m,mode=1777 \\
+      --tmpfs /run/fairing-auth:rw,noexec,nosuid,size=1m,mode=0700,uid=1000,gid=1000 \\
+      --tmpfs /tmp:rw,noexec,nosuid,size=512m,mode=1777,uid=1000,gid=1000 \\
       --memory 4g \\
       --memory-reservation 3g \\
       --memory-swap 4g \\
@@ -70,6 +82,9 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       --env-file '$REMOTE_ENV_FILE' \\
       -e FAIRING_SECRET_DIR=/run/homeserver-secrets \\
       -e FAIRING_OIDC_REDIRECT_URI=https://ruoyi.net.cn/oauth2callback \\
+      -e HOME=/tmp/fairing-home \\
+      -e HF_HOME=/cache/huggingface \\
+      -e HF_HUB_OFFLINE=1 \\
       -e DATA_DIR=/data/fairing \\
       -e FAIRING_ROOT=/fairing \\
       -e PAYLOAD_ROOT=/payload \\
@@ -86,7 +101,7 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       -v '$REMOTE_DIR':/fairing:ro \\
       -v /opt/docker/payload_git:/payload:ro \\
       -v /opt/docker/fairing/config:/app/config:ro \\
-      -v /opt/docker/hf_cache:/root/.cache/huggingface \\
+      -v /opt/docker/hf_cache:/cache/huggingface:ro \\
       \"\$image\" >/dev/null
   }
   docker stop fairing >/dev/null 2>&1 || true
@@ -99,6 +114,9 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
     if [[ \"\$state\" == unhealthy ]]; then break; fi
     sleep 2
   done
+  if [[ \"\$healthy\" == 1 ]] && ! docker exec fairing python /fairing/deploy/fairing-runtime-smoke.py; then
+    healthy=0
+  fi
   if [[ \"\$healthy\" != 1 ]]; then
     docker logs --tail 100 fairing >&2 || true
     docker stop fairing >/dev/null 2>&1 || true
