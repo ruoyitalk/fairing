@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CONF=${FAIRING_CRON_TIME_FILE:-/data/fairing/.cron_time}
+CRONTAB_BIN=${CRONTAB_BIN:-crontab}
+
+[[ -f "$CONF" ]] || exit 0
+
+TIME=$(tr -d '\r\n' <"$CONF")
+IFS=: read -r HOUR MIN EXTRA <<<"$TIME"
+if [[ -n "${EXTRA:-}" || ! "$HOUR" =~ ^[0-9]+$ || ! "$MIN" =~ ^[0-9]+$ ]]; then
+    printf 'invalid fairing cron time: %s\n' "$TIME" >&2
+    exit 1
+fi
+if ((10#$HOUR > 23 || 10#$MIN > 59)); then
+    printf 'fairing cron time out of range: %s\n' "$TIME" >&2
+    exit 1
+fi
+
+NEW=$(printf '%d %d * * * /usr/local/bin/cron-alert-wrapper.sh fairing-daily-run /usr/local/sbin/fairing-daily-run' \
+    "$((10#$MIN))" "$((10#$HOUR))")
+EXISTING=$("$CRONTAB_BIN" -l 2>/dev/null || true)
+CURRENT=$(printf '%s\n' "$EXISTING" \
+    | grep -F '/usr/local/bin/cron-alert-wrapper.sh fairing-daily-run /usr/local/sbin/fairing-daily-run' \
+    | head -n 1 || true)
+LEGACY_COUNT=$(printf '%s\n' "$EXISTING" \
+    | grep -Ec '/fairing/main\.py|docker exec.*fairing.*&&.*curl' || true)
+
+if [[ "$CURRENT" != "$NEW" || "$LEGACY_COUNT" -ne 0 ]]; then
+    NEXT=$(mktemp /tmp/fairing-crontab.XXXXXX)
+    trap 'rm -f "$NEXT"' EXIT
+    printf '%s\n' "$EXISTING" \
+        | grep -Ev '/fairing/main\.py|docker exec.*fairing.*&&.*curl|/usr/local/bin/cron-alert-wrapper\.sh fairing-daily-run /usr/local/sbin/fairing-daily-run' \
+        >"$NEXT" || true
+    printf '%s\n' "$NEW" >>"$NEXT"
+    "$CRONTAB_BIN" "$NEXT"
+fi

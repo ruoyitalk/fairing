@@ -53,12 +53,16 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
     docker run -d \\
       --name fairing \\
       --restart unless-stopped \\
+      --read-only \\
+      --tmpfs /run/fairing-auth:rw,noexec,nosuid,size=1m,mode=0700 \\
+      --tmpfs /tmp:rw,noexec,nosuid,size=512m,mode=1777 \\
       --memory 4g \\
       --memory-reservation 3g \\
       --memory-swap 4g \\
       --cpu-shares 256 \\
       --pids-limit 512 \\
       --label com.centurylinklabs.watchtower.enable=false \\
+      --cap-drop ALL \\
       --security-opt no-new-privileges:true \\
       --network docker_proxy \\
       --gpus all \\
@@ -102,6 +106,18 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
     if [[ -n \"\$previous_image\" ]]; then run_fairing \"\$previous_image\"; fi
     exit 1
   fi
+  install -o root -g root -m 0755 '$REMOTE_DIR/deploy/fairing-daily-run' /usr/local/sbin/fairing-daily-run
+  install -o root -g root -m 0755 '$REMOTE_DIR/deploy/sync-fairing-cron' /usr/local/sbin/sync-fairing-cron
+  cron_file=\"\$(mktemp /tmp/fairing-owner-cron.XXXXXX)\"
+  trap 'rm -f \"\$cron_file\"' EXIT
+  (crontab -u jieker -l 2>/dev/null || true) \\
+    | grep -Ev '/home/jieker/sync_fairing_cron\.sh|/usr/local/sbin/sync-fairing-cron' \\
+    >\"\$cron_file\" || true
+  printf '%s\n' '* * * * * /usr/local/sbin/sync-fairing-cron' >>\"\$cron_file\"
+  crontab -u jieker \"\$cron_file\"
+  rm -f \"\$cron_file\"
+  trap - EXIT
+  runuser -u jieker -- /usr/local/sbin/sync-fairing-cron
   docker inspect fairing --format 'image={{.Config.Image}} revision={{index .Config.Labels \"org.opencontainers.image.revision\"}} state={{.State.Status}}/{{.State.Health.Status}} restarts={{.RestartCount}}'
 "
 

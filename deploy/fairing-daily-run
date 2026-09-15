@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+containers=$(docker ps \
+    --filter 'label=com.docker.compose.service=fairing' \
+    --format '{{.ID}}')
+if [[ $(wc -w <<<"$containers") -ne 1 ]]; then
+    containers=$(docker ps --filter 'name=^/fairing$' --format '{{.ID}}')
+fi
+if [[ $(wc -w <<<"$containers") -ne 1 ]]; then
+    echo "Fairing container resolution failed" >&2
+    exit 1
+fi
+
+docker exec "$containers" python /fairing/main.py run --force
