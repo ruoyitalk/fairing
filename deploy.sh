@@ -53,6 +53,11 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
     docker run -d \\
       --name fairing \\
       --restart unless-stopped \\
+      --memory 4g \\
+      --memory-reservation 3g \\
+      --memory-swap 4g \\
+      --cpu-shares 256 \\
+      --pids-limit 512 \\
       --label com.centurylinklabs.watchtower.enable=false \\
       --security-opt no-new-privileges:true \\
       --network docker_proxy \\
