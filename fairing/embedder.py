@@ -9,6 +9,7 @@ only once per URL.
 """
 import json
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -43,16 +44,27 @@ def _build_text(article: dict) -> str:
     return " ".join(p for p in parts if p)
 
 
-def _load_store() -> dict[str, dict]:
+def _load_store(requested_urls: set[str] | None = None) -> dict[str, dict]:
+    """Load the full store or only the requested URL rows.
+
+    The production store is hundreds of MiB.  Reading it with
+    ``read_text().splitlines()`` briefly held the raw file, every line, and all
+    decoded embeddings at once.  Daily ingestion only needs rows matching the
+    current article URLs, so stream the file and materialize that bounded set.
+    """
     if not _scoring_store_file().exists():
         return {}
     store = {}
     bad_lines = 0
-    for line_no, line in enumerate(_scoring_store_file().read_text(encoding="utf-8").splitlines(), 1):
-        if line.strip():
+    with _scoring_store_file().open(encoding="utf-8") as source:
+        for line_no, line in enumerate(source, 1):
+            if not line.strip():
+                continue
             try:
                 entry = json.loads(line)
-                store[entry["url"]] = entry
+                url = entry["url"]
+                if requested_urls is None or url in requested_urls:
+                    store[url] = entry
             except (json.JSONDecodeError, KeyError) as exc:
                 bad_lines += 1
                 logger.warning(
@@ -64,6 +76,19 @@ def _load_store() -> dict[str, dict]:
     if bad_lines:
         logger.warning("Skipped %d malformed scoring store row(s)", bad_lines)
     return store
+
+
+def _embedding_batch_size() -> int:
+    raw = os.environ.get("FAIRING_EMBED_BATCH_SIZE", "16")
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid FAIRING_EMBED_BATCH_SIZE=%r; using 16", raw)
+        return 16
+    if not 1 <= value <= 64:
+        logger.warning("FAIRING_EMBED_BATCH_SIZE=%d is outside 1..64; using 16", value)
+        return 16
+    return value
 
 
 def _append_store(entry: dict) -> None:
@@ -181,7 +206,8 @@ def enrich(articles: list[dict]) -> list[dict]:
     @param articles: list of article dicts
     @return: same list with text_for_scoring and embedding added in-place
     """
-    store = _load_store()
+    requested_urls = {a.get("url", "") for a in articles if a.get("url")}
+    store = _load_store(requested_urls)
     to_embed: list[tuple[int, dict]] = []
 
     for i, a in enumerate(articles):
@@ -195,27 +221,41 @@ def enrich(articles: list[dict]) -> list[dict]:
             to_embed.append((i, a))
 
     if to_embed:
-        model  = _get_model()
-        texts  = [a["text_for_scoring"] for _, a in to_embed]
-        vecs   = model.encode(texts, show_progress_bar=False)
-        for (i, a), vec in zip(to_embed, vecs):
-            a["embedding"] = vec.tolist()
-            _append_store({
-                "url":              a["url"],
-                "date":             a.get("published", ""),
-                "source":           a.get("source", ""),
-                "category":         a.get("category", ""),
-                "tags":             a.get("tags", []),
-                "title":            a.get("title", ""),
-                "text_for_scoring": a["text_for_scoring"],
-                "full_text":        a.get("full_text", ""),
-                "fetch_engine":     a.get("fetch_engine", ""),
-                "fetch_blocked":    a.get("fetch_blocked", False),
-                "fetch_error_type": a.get("fetch_error_type"),
-                "fetch_block_reason": a.get("fetch_block_reason"),
-                "upstream_status":  a.get("upstream_status"),
-                "embedding":        a["embedding"],
-            })
+        model = _get_model()
+        batch_size = _embedding_batch_size()
+        logger.info("Embedding %d new articles in batches of %d", len(to_embed), batch_size)
+        for start in range(0, len(to_embed), batch_size):
+            batch = to_embed[start:start + batch_size]
+            texts = [a["text_for_scoring"] for _, a in batch]
+            vecs = model.encode(
+                texts,
+                batch_size=batch_size,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )
+            for (i, a), vec in zip(batch, vecs):
+                a["embedding"] = vec.tolist()
+                _append_store({
+                    "url":              a["url"],
+                    "date":             a.get("published", ""),
+                    "source":           a.get("source", ""),
+                    "category":         a.get("category", ""),
+                    "tags":             a.get("tags", []),
+                    "title":            a.get("title", ""),
+                    "text_for_scoring": a["text_for_scoring"],
+                    "full_text":        a.get("full_text", ""),
+                    "fetch_engine":     a.get("fetch_engine", ""),
+                    "fetch_blocked":    a.get("fetch_blocked", False),
+                    "fetch_error_type": a.get("fetch_error_type"),
+                    "fetch_block_reason": a.get("fetch_block_reason"),
+                    "upstream_status":  a.get("upstream_status"),
+                    "embedding":        a["embedding"],
+                })
+            logger.info(
+                "Embedding progress: %d/%d",
+                min(start + len(batch), len(to_embed)),
+                len(to_embed),
+            )
         logger.info("Embedded %d new articles", len(to_embed))
 
     return articles

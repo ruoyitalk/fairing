@@ -102,3 +102,65 @@ def test_load_store_skips_malformed_rows(tmp_path, monkeypatch):
 
     assert list(store) == ["https://example.com/good"]
     assert store["https://example.com/good"]["title"] == "Good"
+
+
+def test_load_store_materializes_only_requested_urls(tmp_path, monkeypatch):
+    from fairing import embedder
+
+    store_path = tmp_path / "scoring_store.jsonl"
+    store_path.write_text(
+        "\n".join(
+            json.dumps({"url": f"https://example.com/{index}", "embedding": [index]})
+            for index in range(100)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(embedder, "_scoring_store_file", lambda: store_path)
+
+    store = embedder._load_store({"https://example.com/7", "https://example.com/91"})
+
+    assert list(store) == ["https://example.com/7", "https://example.com/91"]
+
+
+def test_enrich_embeds_and_persists_in_bounded_batches(tmp_path, monkeypatch):
+    # Import export before temporarily replacing paths.title_index_file.  The
+    # export module binds path helpers at import time, so importing it while the
+    # helper is patched would leak the test path into later test modules.
+    from fairing import embedder
+    from fairing import export as _export  # noqa: F401
+
+    store_path = tmp_path / "scoring_store.jsonl"
+    title_path = tmp_path / "title_index.jsonl"
+    monkeypatch.setattr(embedder, "_scoring_store_file", lambda: store_path)
+    monkeypatch.setenv("FAIRING_EMBED_BATCH_SIZE", "3")
+
+    from fairing import paths
+
+    monkeypatch.setattr(paths, "title_index_file", lambda: title_path)
+    calls: list[int] = []
+
+    class Vector(list):
+        def tolist(self):
+            return list(self)
+
+    class Model:
+        def encode(self, texts, **kwargs):
+            calls.append(len(texts))
+            assert kwargs["batch_size"] == 3
+            assert kwargs["convert_to_numpy"] is True
+            return [Vector([float(len(text))] * 4) for text in texts]
+
+    monkeypatch.setattr(embedder, "_get_model", lambda: Model())
+    articles = [
+        {"url": f"https://example.com/{index}", "title": f"Article {index}"}
+        for index in range(8)
+    ]
+
+    result = embedder.enrich(articles)
+
+    assert result is articles
+    assert calls == [3, 3, 2]
+    assert all(len(article["embedding"]) == 4 for article in articles)
+    assert len(store_path.read_text(encoding="utf-8").splitlines()) == 8
+    assert len(title_path.read_text(encoding="utf-8").splitlines()) == 8
