@@ -55,6 +55,19 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
   fi
   install -o root -g root -m 0644 '$REMOTE_DIR/config/sources.yaml' /opt/docker/fairing/config/sources.yaml
   install -o root -g root -m 0644 '$REMOTE_DIR/config/subscriptions.yaml' /opt/docker/fairing/config/subscriptions.yaml
+  run_lock=/data/fairing/fairing_run.lock
+  if [[ -e \"\$run_lock\" ]]; then
+    if [[ -L \"\$run_lock\" || ! -f \"\$run_lock\" ]]; then
+      echo \"Fairing run lock is not a regular file: \$run_lock\" >&2
+      exit 1
+    fi
+    if ! flock -n \"\$run_lock\" -c true; then
+      echo \"Fairing run lock is active; refusing deployment\" >&2
+      exit 1
+    fi
+    chown 1000:1000 \"\$run_lock\"
+    chmod 0644 \"\$run_lock\"
+  fi
   run_fairing() {
     local image=\"\$1\"
     docker run -d \\

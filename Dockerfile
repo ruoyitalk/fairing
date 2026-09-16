@@ -41,6 +41,8 @@ USER 1000:1000
 
 EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8501/_stcore/health || exit 1
+    CMD python -m fairing.runtime_probe >/dev/null \
+        && curl -fsS http://127.0.0.1:8501/_stcore/health \
+        || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

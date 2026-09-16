@@ -12,4 +12,5 @@ if [[ $(wc -w <<<"$containers") -ne 1 ]]; then
     exit 1
 fi
 
+docker exec "$containers" python -m fairing.runtime_probe
 docker exec "$containers" python /fairing/main.py run --no-mail

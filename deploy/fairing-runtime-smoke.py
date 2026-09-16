@@ -14,6 +14,7 @@ from fairing.config import Config
 from fairing.embedder import _get_model
 from fairing.export import load_payload_queue
 from fairing.paths import feedback_file, title_index_file
+from fairing.runtime_probe import verify_run_lock
 from fairing.trainer import load_feedback
 from fairing.web_auth import read_secret
 
@@ -37,6 +38,7 @@ def main() -> None:
 
     feedback = load_feedback()
     queue = load_payload_queue()
+    run_lock = verify_run_lock()
     # Opening the canonical append-only file checks the actual write permission
     # without altering its content.
     with feedback_file().open("a", encoding="utf-8"):
@@ -66,6 +68,7 @@ def main() -> None:
         "embedding_dimension": dimension,
         "uid": os.getuid(),
         "gid": os.getgid(),
+        "run_lock": str(run_lock),
     }, ensure_ascii=False, sort_keys=True))
 
 

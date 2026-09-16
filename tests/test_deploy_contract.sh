@@ -42,6 +42,10 @@ if ! grep -Fq 'USER 1000:1000' "$SCRIPT_DIR/../Dockerfile"; then
   printf 'Fairing image must declare the non-root runtime user\n' >&2
   exit 1
 fi
+if ! grep -Fq 'python -m fairing.runtime_probe' "$SCRIPT_DIR/../Dockerfile"; then
+  printf 'Fairing image healthcheck must verify the scheduled-run lock\n' >&2
+  exit 1
+fi
 
 for contract in \
   "install -o root -g root -m 0644 '\$REMOTE_DIR/config/sources.yaml' /opt/docker/fairing/config/sources.yaml" \
@@ -60,6 +64,15 @@ if ! grep -Fq 'docker exec fairing python /fairing/deploy/fairing-runtime-smoke.
   printf 'Fairing deploy must run the production data and model smoke probe\n' >&2
   exit 1
 fi
+for contract in \
+  'if ! flock -n \"\$run_lock\" -c true' \
+  'chown 1000:1000 \"\$run_lock\"' \
+  'chmod 0644 \"\$run_lock\"'; do
+  if ! grep -Fq -- "$contract" "$DEPLOY_SCRIPT"; then
+    printf 'Fairing deploy is missing run-lock ownership repair: %s\n' "$contract" >&2
+    exit 1
+  fi
+done
 
 if grep -Fqi -- 'n8n' "$SCRIPT_DIR/../deploy/sync-fairing-cron"; then
   printf 'Fairing cron sync must not mutate the retired n8n scheduler\n' >&2
@@ -69,6 +82,11 @@ fi
 if ! grep -Fqx 'docker exec "$containers" python /fairing/main.py run --no-mail' \
   "$SCRIPT_DIR/../deploy/fairing-daily-run"; then
   printf 'Fairing daily run must respect the label gate and suppress legacy mail\n' >&2
+  exit 1
+fi
+if ! grep -Fqx 'docker exec "$containers" python -m fairing.runtime_probe' \
+  "$SCRIPT_DIR/../deploy/fairing-daily-run"; then
+  printf 'Fairing daily run must verify the canonical run lock before execution\n' >&2
   exit 1
 fi
 if grep -Fq -- '--force' "$SCRIPT_DIR/../deploy/fairing-daily-run"; then
