@@ -154,6 +154,66 @@ def test_fetch_rss_continues_after_failed_source():
     assert articles[0]["title"] == "Survived"
 
 
+def test_hnrss_failure_falls_back_to_algolia():
+    from fairing.rss import fetch_rss
+
+    src = _source(
+        name="HackerNews: systems thinking",
+        url="https://hnrss.org/newest?q=systems+thinking",
+    )
+    fallback = _fake_feed([_fake_entry(title="Systems story")])
+    with patch("fairing.rss._fetch_with_retry", return_value=None), \
+         patch("fairing.rss._fetch_hnrss_fallback", return_value=fallback) as mock_fallback, \
+         patch("fairing.rss._record_feed_error") as mock_error:
+        articles = fetch_rss([src])
+
+    assert [article["title"] for article in articles] == ["Systems story"]
+    mock_fallback.assert_called_once_with(src.url, 20)
+    mock_error.assert_not_called()
+
+
+def test_hnrss_algolia_fallback_builds_feed_entries():
+    from fairing.rss import _fetch_hnrss_fallback
+
+    response = MagicMock()
+    response.json.return_value = {
+        "hits": [
+            {
+                "objectID": "123",
+                "title": "A resilient feed",
+                "url": "",
+                "story_text": "Fallback body",
+                "created_at_i": 1_700_000_000,
+            }
+        ]
+    }
+    with patch("fairing.rss.requests.get", return_value=response) as mock_get:
+        feed = _fetch_hnrss_fallback(
+            "https://hnrss.org/newest?q=systems+thinking",
+            timeout=7,
+        )
+
+    assert feed.bozo is False
+    assert len(feed.entries) == 1
+    assert feed.entries[0].title == "A resilient feed"
+    assert feed.entries[0].link == "https://news.ycombinator.com/item?id=123"
+    assert mock_get.call_args.kwargs["params"] == {
+        "query": "systems thinking",
+        "tags": "story",
+        "hitsPerPage": 20,
+        "restrictSearchableAttributes": "title",
+    }
+    assert mock_get.call_args.kwargs["timeout"] == 7
+
+
+def test_non_hnrss_url_has_no_algolia_fallback():
+    from fairing.rss import _fetch_hnrss_fallback
+
+    with patch("fairing.rss.requests.get") as mock_get:
+        assert _fetch_hnrss_fallback("https://example.com/feed.xml", timeout=7) is None
+    mock_get.assert_not_called()
+
+
 def test_prune_feed_errors_removes_disabled_or_removed_sources(tmp_path):
     from fairing import rss
 

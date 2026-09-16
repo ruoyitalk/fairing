@@ -95,6 +95,8 @@ if grep -Fq -- '--force' "$SCRIPT_DIR/../deploy/fairing-daily-run"; then
   printf 'Fairing daily run must not bypass the label gate\n' >&2
   exit 1
 fi
+grep -Fq 'tee -a "$LOG_FILE"' "$SCRIPT_DIR/../deploy/fairing-daily-run"
+grep -Fq 'Fairing daily run completed' "$SCRIPT_DIR/../deploy/fairing-daily-run"
 
 test_dir=$(mktemp -d /tmp/fairing-cron-contract.XXXXXX)
 trap 'rm -rf "$test_dir"' EXIT
@@ -124,6 +126,33 @@ if grep -Eq '/fairing/main\.py|docker exec.*fairing.*&&.*curl' "$test_dir/cronta
   printf 'Fairing cron sync retained a legacy execution path\n' >&2
   exit 1
 fi
+
+mkdir -p "$test_dir/bin"
+cat >"$test_dir/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+case "${1:-}" in
+  ps)
+    printf 'fairing-container\n'
+    ;;
+  exec)
+    printf 'mock docker exec: %s\n' "${*:3}"
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+EOF
+chmod 0755 "$test_dir/bin/docker"
+printf 'old-log-data\n' >"$test_dir/fairing.log"
+PATH="$test_dir/bin:$PATH" \
+FAIRING_RUN_LOG="$test_dir/fairing.log" \
+FAIRING_RUN_LOG_MAX_BYTES=5 \
+  bash "$SCRIPT_DIR/../deploy/fairing-daily-run" >/dev/null
+grep -Fqx 'old-log-data' "$test_dir/fairing.log.1"
+grep -Fq 'python -m fairing.runtime_probe' "$test_dir/fairing.log"
+grep -Fq 'python /fairing/main.py run --no-mail' "$test_dir/fairing.log"
+grep -Fq 'Fairing daily run completed' "$test_dir/fairing.log"
 
 bash -n "$DEPLOY_SCRIPT"
 bash -n "$SCRIPT_DIR/../deploy/fairing-daily-run"

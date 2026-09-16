@@ -6,6 +6,7 @@ import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from time import mktime
+from urllib.parse import parse_qs, urlparse
 
 import feedparser
 import requests
@@ -25,6 +26,8 @@ _FEED_HEADERS = {
     ),
     "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*;q=0.8",
 }
+
+_HN_ALGOLIA_URL = "https://hn.algolia.com/api/v1/search_by_date"
 
 LOOKBACK_MIN_HOURS = 25
 
@@ -91,6 +94,64 @@ def _fetch_feed(url: str, timeout: int):
         resp.content,
         response_headers={"content-type": resp.headers.get("content-type", "")},
     )
+
+
+def _fetch_hnrss_fallback(url: str, timeout: int):
+    """Fetch an hnrss search feed from its upstream Algolia index.
+
+    hnrss.org is a thin RSS facade over the public Algolia Hacker News search
+    service. Keep it as the primary source, but avoid losing a topic whenever
+    that facade returns a transient 5xx response.
+    """
+    parsed = urlparse(url)
+    if parsed.hostname != "hnrss.org" or parsed.path.rstrip("/") != "/newest":
+        return None
+
+    query = parse_qs(parsed.query).get("q", [""])[0].strip()
+    if not query:
+        return None
+
+    try:
+        resp = requests.get(
+            _HN_ALGOLIA_URL,
+            timeout=timeout,
+            headers={**_FEED_HEADERS, "Accept": "application/json"},
+            params={
+                "query": query,
+                "tags": "story",
+                "hitsPerPage": 20,
+                "restrictSearchableAttributes": "title",
+            },
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("hnrss Algolia fallback failed (%s)", exc)
+        return None
+
+    entries = []
+    for hit in payload.get("hits", []):
+        title = (hit.get("title") or hit.get("story_title") or "").strip()
+        object_id = str(hit.get("objectID") or "").strip()
+        if not title or not object_id:
+            continue
+        link = (hit.get("url") or "").strip()
+        if not link:
+            link = f"https://news.ycombinator.com/item?id={object_id}"
+        created_at = hit.get("created_at_i")
+        entries.append(feedparser.FeedParserDict({
+            "title": title,
+            "link": link,
+            "summary": hit.get("story_text") or "",
+            "published_parsed": time.gmtime(created_at) if isinstance(created_at, int) else None,
+            "updated_parsed": None,
+            "media_content": [],
+            "media_thumbnail": [],
+            "enclosures": [],
+        }))
+
+    logger.info("hnrss unavailable; Algolia fallback returned %d stories for %r", len(entries), query)
+    return feedparser.FeedParserDict({"entries": entries, "bozo": False})
 
 
 def _parse_entry_date(entry) -> datetime | None:
@@ -174,6 +235,8 @@ def fetch_rss(sources: list[RssSource],
             logger.info("[%s] disabled — skipping", source.name)
             continue
         feed = _fetch_with_retry(source.url, timeout, retries, _RETRY_DELAY)
+        if feed is None:
+            feed = _fetch_hnrss_fallback(source.url, timeout)
 
         if feed is None:
             logger.warning("[%s] skipped after %d failed attempts", source.name, retries + 1)

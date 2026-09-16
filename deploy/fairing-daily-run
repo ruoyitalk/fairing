@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+readonly LOG_FILE="${FAIRING_RUN_LOG:-/data/fairing/cron.log}"
+readonly LOG_MAX_BYTES="${FAIRING_RUN_LOG_MAX_BYTES:-5242880}"
+
+if [[ ! "$LOG_MAX_BYTES" =~ ^[0-9]+$ ]]; then
+    echo "Invalid Fairing log size: $LOG_MAX_BYTES" >&2
+    exit 64
+fi
+if [[ -e "$LOG_FILE" && ( -L "$LOG_FILE" || ! -f "$LOG_FILE" ) ]]; then
+    echo "Fairing run log is not a regular file: $LOG_FILE" >&2
+    exit 1
+fi
+if [[ -f "$LOG_FILE" ]] && (( $(wc -c <"$LOG_FILE") >= LOG_MAX_BYTES )); then
+    mv -f -- "$LOG_FILE" "$LOG_FILE.1"
+fi
+
 containers=$(docker ps \
     --filter 'label=com.docker.compose.service=fairing' \
     --format '{{.ID}}')
@@ -12,5 +27,9 @@ if [[ $(wc -w <<<"$containers") -ne 1 ]]; then
     exit 1
 fi
 
+{
+printf '%s Fairing daily run started\n' "$(date -Is)"
 docker exec "$containers" python -m fairing.runtime_probe
 docker exec "$containers" python /fairing/main.py run --no-mail
+printf '%s Fairing daily run completed\n' "$(date -Is)"
+} 2>&1 | tee -a "$LOG_FILE"
