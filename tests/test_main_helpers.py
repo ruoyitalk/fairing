@@ -137,3 +137,14 @@ def test_enrich_full_text_for_scoring_preserves_blocked_diagnostics():
     assert articles[0]["fetch_block_reason"] == "akamai_edgesuite"
     assert articles[0]["upstream_status"] == 403
     assert "full_text" not in articles[0]
+
+
+def test_finalize_successful_run_backs_up_before_advancing_marker():
+    import main
+
+    calls = []
+    with patch("fairing.backup.run_backup", side_effect=lambda: calls.append("backup")), \
+         patch.object(main, "_save_last_run_time", side_effect=lambda: calls.append("marker")):
+        main._finalize_successful_run()
+
+    assert calls == ["backup", "marker"]

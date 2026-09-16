@@ -106,6 +106,50 @@ def test_list_backups_empty_when_no_dir(tmp_path, monkeypatch):
     assert b.list_backups() == []
 
 
+def test_list_backups_ignores_noncanonical_and_unsafe_entries(patch_backup):
+    from fairing.backup import list_backups, backup_dir
+
+    root = backup_dir()
+    valid = root / "2026-03-20"
+    valid.mkdir(parents=True)
+    (root / "2026-3-19").mkdir()
+    (root / "2026-03-18").symlink_to(valid, target_is_directory=True)
+
+    assert list_backups() == ["2026-03-20"]
+
+
+def test_prune_refuses_snapshot_with_foreign_content(patch_backup):
+    import fairing.backup as b
+
+    snapshot = patch_backup["bak_root"] / "2000-01-01"
+    snapshot.mkdir(parents=True)
+    (snapshot / "foreign.txt").write_text("do not delete", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Unsafe dated backup snapshot"):
+        b._prune(patch_backup["bak_root"])
+
+    assert snapshot.exists()
+
+
+def test_prune_removes_old_valid_snapshot(patch_backup):
+    import fairing.backup as b
+
+    snapshot = patch_backup["bak_root"] / "2000-01-01"
+    snapshot.mkdir(parents=True)
+    (snapshot / "feedback.jsonl").write_text("{}\n", encoding="utf-8")
+
+    b._prune(patch_backup["bak_root"])
+
+    assert not snapshot.exists()
+
+
+def test_snapshot_path_rejects_path_traversal(patch_backup):
+    import fairing.backup as b
+
+    with pytest.raises(ValueError):
+        b._snapshot_path("../../foreign")
+
+
 # ── diff_summary ───────────────────────────────────────────────────────────────
 
 def test_diff_summary_identical_files(patch_backup):

@@ -177,6 +177,14 @@ def _save_last_run_time() -> None:
     _last_run_time_file().write_text(datetime.now(_TZ_BEIJING).isoformat())
 
 
+def _finalize_successful_run() -> None:
+    """Back up state and advance the lookback marker after a successful run."""
+    from fairing.backup import run_backup
+
+    run_backup()
+    _save_last_run_time()
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _clear() -> None:
@@ -1496,6 +1504,7 @@ def _run_digest_locked(chinese: bool = False,
     articles = filter_unseen(articles)
     if not articles:
         logger.info("No new articles after dedup.")
+        _finalize_successful_run()
         return
     logger.info("Fresh: %d articles", len(articles))
 
@@ -1553,9 +1562,7 @@ def _run_digest_locked(chinese: bool = False,
         logger.info("Rate task ready: %d labels needed today (total seen: %d) — run \\rate to label",
                     n, today_total)
 
-    from fairing.backup import run_backup
-    run_backup()
-    _save_last_run_time()
+    _finalize_successful_run()
 
 
 # ── interactive shell ─────────────────────────────────────────────────────────

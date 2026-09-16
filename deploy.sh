@@ -68,6 +68,8 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
     chown 1000:1000 \"\$run_lock\"
     chmod 0644 \"\$run_lock\"
   fi
+  python3 '$REMOTE_DIR/fairing/backup_ownership.py' \
+    --root /data/data_bak --uid 1000 --gid 1000
   run_fairing() {
     local image=\"\$1\"
     docker run -d \\

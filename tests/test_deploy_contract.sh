@@ -67,7 +67,9 @@ fi
 for contract in \
   'if ! flock -n \"\$run_lock\" -c true' \
   'chown 1000:1000 \"\$run_lock\"' \
-  'chmod 0644 \"\$run_lock\"'; do
+  'chmod 0644 \"\$run_lock\"' \
+  "python3 '\$REMOTE_DIR/fairing/backup_ownership.py'" \
+  '--root /data/data_bak --uid 1000 --gid 1000'; do
   if ! grep -Fq -- "$contract" "$DEPLOY_SCRIPT"; then
     printf 'Fairing deploy is missing run-lock ownership repair: %s\n' "$contract" >&2
     exit 1

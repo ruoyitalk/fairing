@@ -27,14 +27,19 @@ import hashlib
 import logging
 import os
 import shutil
-from datetime import datetime, timedelta, timezone
+import stat
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 
 def _file_md5(path: Path) -> str | None:
     if not path.exists():
         return None
-    return hashlib.md5(path.read_bytes()).hexdigest()
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +56,77 @@ def _data_files() -> list[Path]:
     return [_ff(), _su(), _ss(), _ti(), _rp(), _pq()]
 
 
+def _allowed_backup_names() -> set[str]:
+    return {path.name for path in _data_files()}
+
+
 def backup_dir() -> Path:
     raw = os.environ.get("BACKUP_DIR", "~/Documents/fairing/data_bak")
     return Path(raw).expanduser()
+
+
+def _ensure_backup_root() -> Path:
+    root = backup_dir()
+    if root.exists() or root.is_symlink():
+        mode = root.lstat().st_mode
+        if root.is_symlink() or not stat.S_ISDIR(mode):
+            raise RuntimeError(f"Backup root is not a regular directory: {root}")
+    else:
+        root.mkdir(parents=True)
+    return root
+
+
+def _parse_backup_date(name: str):
+    """Return a date only for canonical YYYY-MM-DD snapshot names."""
+    try:
+        parsed = datetime.strptime(name, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return parsed if parsed.isoformat() == name else None
+
+
+def _validate_snapshot_dir(path: Path) -> None:
+    """Reject links, special files, and foreign content in a Fairing snapshot."""
+    mode = path.lstat().st_mode
+    if path.is_symlink() or not stat.S_ISDIR(mode):
+        raise RuntimeError(f"Backup snapshot is not a regular directory: {path}")
+
+    allowed = _allowed_backup_names()
+    for child in path.iterdir():
+        child_mode = child.lstat().st_mode
+        if child.name not in allowed or child.is_symlink() or not stat.S_ISREG(child_mode):
+            raise RuntimeError(f"Backup snapshot contains an unsafe entry: {child}")
+
+
+def _snapshot_path(date_str: str) -> Path:
+    if _parse_backup_date(date_str) is None:
+        raise ValueError(f"Invalid backup date: {date_str!r}")
+    path = backup_dir() / date_str
+    if path.exists() or path.is_symlink():
+        _validate_snapshot_dir(path)
+    return path
+
+
+def _snapshot_dirs(base: Path, *, strict: bool = False) -> list[tuple[date, Path]]:
+    snapshots: list[tuple[date, Path]] = []
+    for candidate in base.iterdir():
+        parsed = _parse_backup_date(candidate.name)
+        if parsed is None:
+            continue
+        try:
+            _validate_snapshot_dir(candidate)
+        except (OSError, RuntimeError) as exc:
+            if strict:
+                raise RuntimeError(f"Unsafe dated backup snapshot: {candidate}") from exc
+            logger.warning("Ignoring unsafe backup snapshot %s: %s", candidate, exc)
+            continue
+        snapshots.append((parsed, candidate))
+    return snapshots
+
+
+def _count_nonempty_lines(path: Path) -> int:
+    with path.open("r", encoding="utf-8") as handle:
+        return sum(1 for line in handle if line.strip())
 
 
 def run_backup() -> tuple[Path, list[str]]:
@@ -62,8 +135,11 @@ def run_backup() -> tuple[Path, list[str]]:
     @return: (dest_path, list_of_backed_up_filenames)
     """
     today = datetime.now(_TZ_BEIJING).strftime("%Y-%m-%d")
-    dest  = backup_dir() / today
+    dest = _ensure_backup_root() / today
+    if dest.exists() or dest.is_symlink():
+        _validate_snapshot_dir(dest)
     dest.mkdir(parents=True, exist_ok=True)
+    _validate_snapshot_dir(dest)
 
     backed_up: list[str] = []
     for src in _data_files():
@@ -86,7 +162,7 @@ def list_backups() -> list[str]:
     if not base.exists():
         return []
     return sorted(
-        [d.name for d in base.iterdir() if d.is_dir() and len(d.name) == 10],
+        [path.name for _, path in _snapshot_dirs(base)],
         reverse=True,
     )
 
@@ -100,7 +176,7 @@ def diff_summary(date_str: str) -> list[dict]:
       current_size,  backup_size   (bytes),
       identical                    (True when both files exist and have the same MD5)
     """
-    bak_dir = backup_dir() / date_str
+    bak_dir = _snapshot_path(date_str)
     result  = []
     for src in _data_files():
         bak   = bak_dir / src.name
@@ -113,24 +189,21 @@ def diff_summary(date_str: str) -> list[dict]:
             "current_size":    src.stat().st_size  if src.exists() else 0,
             "backup_size":     bak.stat().st_size  if bak.exists() else 0,
         }
-        entry["identical"] = (_file_md5(src) == _file_md5(bak) and
-                              _file_md5(src) is not None)
+        current_md5 = _file_md5(src)
+        backup_md5 = _file_md5(bak)
+        entry["identical"] = current_md5 is not None and current_md5 == backup_md5
         if src.suffix == ".jsonl":
             if src.exists():
-                entry["current_lines"] = sum(
-                    1 for ln in src.read_text(encoding="utf-8").splitlines() if ln.strip()
-                )
+                entry["current_lines"] = _count_nonempty_lines(src)
             if bak.exists():
-                entry["backup_lines"] = sum(
-                    1 for ln in bak.read_text(encoding="utf-8").splitlines() if ln.strip()
-                )
+                entry["backup_lines"] = _count_nonempty_lines(bak)
         result.append(entry)
     return result
 
 
 def all_identical(date_str: str) -> bool:
     """Return True if every existing current file is byte-for-byte identical to its backup."""
-    bak_dir = backup_dir() / date_str
+    bak_dir = _snapshot_path(date_str)
     for src in _data_files():
         bak = bak_dir / src.name
         if src.exists() and bak.exists():
@@ -146,7 +219,7 @@ def restore_backup(date_str: str) -> list[str]:
 
     @return: list of restored filenames
     """
-    bak_dir  = backup_dir() / date_str
+    bak_dir = _snapshot_path(date_str)
     restored = []
     for src in _data_files():
         bak = bak_dir / src.name
@@ -161,8 +234,8 @@ def restore_backup(date_str: str) -> list[str]:
 def _prune(base: Path) -> None:
     if not base.exists():
         return
-    cutoff = (datetime.now(_TZ_BEIJING) - timedelta(days=RETAIN_DAYS)).strftime("%Y-%m-%d")
-    for d in sorted(base.iterdir()):
-        if d.is_dir() and d.name <= cutoff:
-            shutil.rmtree(d)
-            logger.info("Pruned old backup: %s", d.name)
+    cutoff = (datetime.now(_TZ_BEIJING) - timedelta(days=RETAIN_DAYS)).date()
+    for snapshot_date, path in sorted(_snapshot_dirs(base, strict=True)):
+        if snapshot_date <= cutoff:
+            shutil.rmtree(path)
+            logger.info("Pruned old backup: %s", path.name)
