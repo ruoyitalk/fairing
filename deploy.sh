@@ -106,7 +106,6 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       -e NEWS_DIR=/data/news \\
       -e KNOWLEDGE_DIR=/data/ruoyi_download \\
       -e PAYLOAD_DATA_DIR=/data/payload \\
-      -e QDRANT_URL=http://qdrant:6333 \\
       -v /data/fairing:/data/fairing \\
       -v /data/news:/data/news \\
       -v /data/ruoyi_download:/data/ruoyi_download \\
