@@ -33,7 +33,7 @@ LABEL org.opencontainers.image.source="$SOURCE_URL" \
 COPY fairing/ ./fairing/
 COPY config/ ./config/
 COPY tests/ ./tests/
-COPY main.py streamlit_app.py docker-entrypoint.sh ./
+COPY main.py streamlit_app.py docker-entrypoint.sh deploy.sh ./
 RUN chmod 0755 /app/docker-entrypoint.sh
 
 ENV HOME=/tmp/fairing-home
