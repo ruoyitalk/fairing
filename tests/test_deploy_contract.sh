@@ -137,6 +137,10 @@ case "${1:-}" in
     ;;
   exec)
     printf 'mock docker exec: %s\n' "${*:3}"
+    if [[ "$*" == *'/fairing/main.py run --no-mail'* ]] &&
+       [[ "${FAKE_FAIRING_RUN_EXIT:-0}" -ne 0 ]]; then
+      exit "$FAKE_FAIRING_RUN_EXIT"
+    fi
     ;;
   *)
     exit 64
@@ -153,6 +157,24 @@ grep -Fqx 'old-log-data' "$test_dir/fairing.log.1"
 grep -Fq 'python -m fairing.runtime_probe' "$test_dir/fairing.log"
 grep -Fq 'python /fairing/main.py run --no-mail' "$test_dir/fairing.log"
 grep -Fq 'Fairing daily run completed' "$test_dir/fairing.log"
+
+set +e
+PATH="$test_dir/bin:$PATH" \
+FAIRING_RUN_LOG="$test_dir/fairing-failure.log" \
+FAKE_FAIRING_RUN_EXIT=75 \
+  bash "$SCRIPT_DIR/../deploy/fairing-daily-run" >/dev/null
+failure_status=$?
+set -e
+if [[ "$failure_status" -ne 75 ]]; then
+  printf 'Fairing daily run did not preserve the pipeline failure status: %s\n' \
+    "$failure_status" >&2
+  exit 1
+fi
+grep -Fq 'Fairing daily run started' "$test_dir/fairing-failure.log"
+if grep -Fq 'Fairing daily run completed' "$test_dir/fairing-failure.log"; then
+  printf 'Fairing daily run recorded completion after a failed pipeline\n' >&2
+  exit 1
+fi
 
 bash -n "$DEPLOY_SCRIPT"
 bash -n "$SCRIPT_DIR/../deploy/fairing-daily-run"

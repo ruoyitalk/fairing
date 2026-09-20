@@ -2,6 +2,7 @@
 import numpy as np
 import sys
 import os
+import pytest
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -148,3 +149,45 @@ def test_finalize_successful_run_backs_up_before_advancing_marker():
         main._finalize_successful_run()
 
     assert calls == ["backup", "marker"]
+
+
+def test_run_digest_reports_busy_lock_as_incomplete():
+    import main
+
+    with patch.object(main, "_acquire_run_lock", return_value=None):
+        assert main.run_digest() is False
+
+
+def test_run_digest_releases_lock_and_propagates_outcome():
+    import main
+
+    lock = object()
+    with patch.object(main, "_acquire_run_lock", return_value=lock), \
+         patch.object(main, "_run_digest_locked", return_value=False), \
+         patch.object(main, "_release_run_lock") as release:
+        assert main.run_digest() is False
+
+    release.assert_called_once_with(lock)
+
+
+def test_locked_run_reports_incomplete_rate_gate():
+    import main
+
+    with patch.object(main, "_check_rate_gate", return_value=False):
+        assert main._run_digest_locked() is False
+
+
+def test_cli_run_exits_tempfail_when_pipeline_does_not_complete(monkeypatch):
+    import main
+
+    monkeypatch.setattr(sys, "argv", ["main.py", "run", "--no-mail"])
+    monkeypatch.setattr(main, "_load_run_defaults", lambda: {
+        "chinese": False,
+        "no_mail": False,
+    })
+    monkeypatch.setattr(main, "run_digest", lambda **_kwargs: False)
+
+    with pytest.raises(SystemExit) as exc:
+        main.main()
+
+    assert exc.value.code == getattr(os, "EX_TEMPFAIL", 75)

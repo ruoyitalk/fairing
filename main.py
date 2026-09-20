@@ -1451,13 +1451,19 @@ def _enrich_full_text_for_scoring(articles: list[dict], cfg) -> None:
 
 
 def run_digest(chinese: bool = False,
-               no_mail: bool = False, force: bool = False) -> None:
+               no_mail: bool = False, force: bool = False) -> bool:
+    """Run the digest pipeline and report whether it reached a valid terminal state.
+
+    Interactive callers may ignore the result because the console already explains
+    why a run was blocked.  Non-interactive callers must treat ``False`` as a
+    temporary failure so schedulers cannot record a skipped run as completed.
+    """
     from dotenv import load_dotenv
     load_dotenv(override=True)
 
     lock_handle = _acquire_run_lock()
     if lock_handle is None:
-        return
+        return False
     try:
         return _run_digest_locked(chinese=chinese, no_mail=no_mail, force=force)
     finally:
@@ -1465,7 +1471,7 @@ def run_digest(chinese: bool = False,
 
 
 def _run_digest_locked(chinese: bool = False,
-                       no_mail: bool = False, force: bool = False) -> None:
+                       no_mail: bool = False, force: bool = False) -> bool:
     """Fetch, score, and deliver the daily digest end-to-end.
 
     @param chinese: translate email to Chinese (MD stays English)
@@ -1476,7 +1482,8 @@ def _run_digest_locked(chinese: bool = False,
     load_dotenv(override=True)
 
     if not _check_rate_gate(force):
-        return
+        logger.warning("Daily run blocked by the incomplete labeling task")
+        return False
 
     elapsed_hours = _hours_since_last_run()
     if elapsed_hours > 24:
@@ -1498,14 +1505,14 @@ def _run_digest_locked(chinese: bool = False,
     articles = fetch_rss(cfg.rss_sources, min_lookback_hours=elapsed_hours)
     if not articles:
         logger.warning("No articles collected.")
-        return
+        return False
     logger.info("Total collected: %d", len(articles))
 
     articles = filter_unseen(articles)
     if not articles:
         logger.info("No new articles after dedup.")
         _finalize_successful_run()
-        return
+        return True
     logger.info("Fresh: %d articles", len(articles))
 
     _enrich_full_text_for_scoring(articles, cfg)
@@ -1563,6 +1570,7 @@ def _run_digest_locked(chinese: bool = False,
                     n, today_total)
 
     _finalize_successful_run()
+    return True
 
 
 # ── interactive shell ─────────────────────────────────────────────────────────
@@ -2643,7 +2651,10 @@ def main() -> None:
         chinese        = "--chinese"  in args or (defaults["chinese"] and "--no-chinese" not in args)
         no_mail        = "--no-mail"  in args or (defaults["no_mail"] and "--mail" not in args)
         force = "--force" in args
-        run_digest(chinese=chinese, no_mail=no_mail, force=force)
+        completed = run_digest(chinese=chinese, no_mail=no_mail, force=force)
+        if not completed:
+            logger.error("Run did not complete; last_run_time was not advanced")
+            raise SystemExit(getattr(os, "EX_TEMPFAIL", 75))
         return
     Shell().cmdloop()
 
