@@ -262,6 +262,6 @@ def enrich(articles: list[dict]) -> list[dict]:
     return articles
 
 
-def load_store() -> dict[str, dict]:
-    """Return full scoring store as {url: entry}."""
-    return _load_store()
+def load_store(requested_urls: set[str] | None = None) -> dict[str, dict]:
+    """Return the full store or only requested URL rows."""
+    return _load_store(requested_urls)

@@ -1,43 +1,7 @@
-"""Tests for fairing/trainer.py — decay weights, training, feedback I/O."""
+"""Tests for fairing/trainer.py — evaluation gate and feedback I/O."""
 import json
 import pytest
 import numpy as np
-
-
-# ── decay weights ─────────────────────────────────────────────────────────────
-
-def test_label_weight_latest_is_one():
-    from fairing.trainer import _label_weight
-    assert _label_weight(9, 10) == 1.0   # last of 10
-
-
-def test_label_weight_one_generation():
-    from fairing.trainer import _label_weight, DECAY_BASE, DECAY_UNIT
-    # 3 newer labels = 1 generation
-    assert _label_weight(DECAY_UNIT - 1, DECAY_UNIT * 2) == DECAY_BASE
-
-
-def test_label_weight_two_generations():
-    from fairing.trainer import _label_weight, DECAY_BASE, DECAY_UNIT
-    # need labels_since = 2*DECAY_UNIT to get 2 generations
-    # labels_since = total - 1 - 0 = total - 1, so total = 2*DECAY_UNIT + 1
-    total = DECAY_UNIT * 2 + 1
-    assert _label_weight(0, total) == DECAY_BASE ** 2
-
-
-def test_label_weight_never_negative():
-    from fairing.trainer import _label_weight
-    for i in range(100):
-        assert _label_weight(i, 100) >= 0
-
-
-def test_label_weight_monotone_decreasing():
-    from fairing.trainer import _label_weight
-    total  = 30
-    weights = [_label_weight(i, total) for i in range(total)]
-    # weights should be non-increasing (older = smaller or equal)
-    for a, b in zip(weights, weights[1:]):
-        assert a <= b
 
 
 # ── feedback I/O ──────────────────────────────────────────────────────────────
@@ -114,8 +78,30 @@ def test_maybe_auto_train_insufficient_data(patch_feedback):
     assert result is None
 
 
+def test_assistant_labels_cannot_satisfy_human_validation_gate(patch_feedback):
+    from fairing.trainer import maybe_auto_train, save_feedback, MIN_TOTAL
+
+    feedback, store = _synthetic_store(MIN_TOTAL // 2, MIN_TOTAL // 2)
+    for row in feedback:
+        save_feedback({**row, "annotator": "assistant"})
+
+    assert maybe_auto_train(store) is None
+
+
+def test_training_due_after_new_feedback(patch_feedback):
+    from fairing.paths import training_log_file
+    from fairing.trainer import save_feedback, training_due
+
+    assert not training_due()
+    save_feedback({"url": "https://example.com", "label": 1})
+    assert training_due()
+    training_log_file().write_text('{}\n', encoding='utf-8')
+    assert not training_due()
+
+
 def test_train_with_sufficient_data(patch_feedback):
     from fairing.trainer import maybe_auto_train, save_feedback, MIN_POS, MIN_NEG, MIN_TOTAL
+    from fairing.paths import model_file, scaler_file, training_log_file
     n = max(MIN_POS, MIN_NEG, MIN_TOTAL // 2) + 2
     feedback, store = _synthetic_store(n, n)
     for f in feedback:
@@ -127,55 +113,17 @@ def test_train_with_sufficient_data(patch_feedback):
     assert result.n_samples == n * 2
     assert result.n_pos == n
     assert result.n_neg == n
-
-
-def test_train_creates_model_file_when_accurate(patch_feedback):
-    """With clearly separable synthetic data, model should deploy."""
-    from fairing.trainer import maybe_auto_train, save_feedback, MIN_TOTAL
-    n = MIN_TOTAL // 2 + 5   # enough samples to exceed MIN_TOTAL
-    feedback, store = _synthetic_store(n, n)
-    for f in feedback:
-        save_feedback(f)
-    result = maybe_auto_train(store)
-    assert result is not None
-    # With clearly separated embeddings, should reach threshold
-    if result.deployed:
-        from fairing.paths import model_file, scaler_file
-        assert model_file().exists()
-        assert scaler_file().exists()
-
-
-def test_train_writes_training_log(patch_feedback):
-    """_train() appends one record to training_log.jsonl."""
-    from fairing.trainer import maybe_auto_train, save_feedback, MIN_TOTAL
-    from fairing.paths import training_log_file
-    n = MIN_TOTAL // 2 + 5
-    feedback, store = _synthetic_store(n, n)
-    for f in feedback:
-        save_feedback(f)
-    before_lines = (
-        len(training_log_file().read_text(encoding="utf-8").splitlines())
-        if training_log_file().exists() else 0
-    )
-    result = maybe_auto_train(store)
-    assert result is not None
-    assert training_log_file().exists()
-    after_lines = len(training_log_file().read_text(encoding="utf-8").splitlines())
-    assert after_lines == before_lines + 1
-
-
-def test_training_log_schema(patch_feedback):
-    """training_log.jsonl entries contain required fields."""
-    import json as _json
-    from fairing.trainer import maybe_auto_train, save_feedback, MIN_TOTAL
-    from fairing.paths import training_log_file
-    n = MIN_TOTAL // 2 + 5
-    feedback, store = _synthetic_store(n, n)
-    for f in feedback:
-        save_feedback(f)
-    maybe_auto_train(store)
-    row = _json.loads(training_log_file().read_text(encoding="utf-8").splitlines()[-1])
-    for field in ("date", "n_samples", "n_pos", "n_neg", "cv_accuracy", "cv_std", "C", "deployed"):
-        assert field in row, f"missing field: {field}"
+    assert result.n_human == n * 2
+    assert result.n_assistant == 0
+    assert len(result.cv_seed_scores) == 3
+    rows = training_log_file().read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 1
+    row = json.loads(rows[0])
+    for field in ("date", "n_samples", "n_pos", "n_neg", "n_human",
+                  "n_assistant", "cv_accuracy", "cv_std", "C", "deployed"):
+        assert field in row
+    assert row["evaluation"] == "human_holdout_nested_cv"
     assert isinstance(row["deployed"], bool)
     assert 0.0 <= row["cv_accuracy"] <= 1.0
+    if result.deployed:
+        assert model_file().exists() and scaler_file().exists()

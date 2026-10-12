@@ -29,7 +29,7 @@ Daily Articles / 每日文章
                │
                ▼
 ┌──────────────────────────────────────┐
-│  LogisticRegressionCV                │
+│  LogisticRegression with CV gate      │
 │  class_weight = balanced             │
 │  scoring = balanced_accuracy         │
 │  MIN_TOTAL = 80 labels required      │
@@ -95,7 +95,7 @@ With pre-trained embeddings, positive and negative classes are often **linearly 
 
 ---
 
-## Regularization: LogisticRegressionCV
+## Regularization: LogisticRegression
 
 **Problem**: 384 features, ~30 samples → severe over-parameterization.
 
@@ -108,7 +108,7 @@ C small → strong regularization → weights pushed toward zero
 C large → weak regularization  → may overfit
 ```
 
-`LogisticRegressionCV` auto-selects C via cross-validation:
+`GridSearchCV` selects C inside each training fold; the scaler is in the same pipeline:
 
 ```
 C candidates:  0.001  0.01  0.1  1.0  10.0
@@ -160,56 +160,26 @@ A well-trained model:
 
 **Deploy threshold: balanced_accuracy ≥ 0.75**
 
-Roughly: 75% of recommended articles are actually relevant; 75% of filtered articles are genuinely uninteresting.
+Balanced accuracy averages positive recall and negative recall. It is not the precision of recommended articles.
 
 ### Stratified K-Fold
 
 ```
-n_folds = min(5, min(n_positive, n_negative))
+n_folds = min(5, min(n_human_positive, n_human_negative))
 
-Each fold preserves the positive/negative ratio.
-每折保留相同的正负比例。
+Only human labels are held out for evaluation. Assistant-inferred labels may
+appear in a training fold, but never in its test fold. Three shuffled runs
+measure split sensitivity.
 ```
 
 ---
 
-## Decay Weights
+## Label Weighting
 
-### Motivation
-
-Interests drift over time. An article topic labeled "highly relevant" three weeks ago may be background knowledge now.
-
-### Count-based decay (not calendar time)
-
-Forgetting speed is tied to **reading pace**, not the calendar:
-- Label 3 articles/day → faster decay
-- Label 3 articles/week → slower decay
-
-```python
-DECAY_BASE = 0.5   # weight halves each generation / 每档权重减半
-DECAY_UNIT = 3     # every 3 new labels = 1 forgetting generation / 每 3 条新标注 = 1 衰减档
-
-weight = DECAY_BASE ** floor(labels_since / DECAY_UNIT)
-```
-
-```
-Decay curve / 衰减曲线:
-
-weight │
-1.0    │████ ████ ████
-       │         ←3→
-0.5    │              ████ ████ ████
-       │                        ←3→
-0.25   │                             ████ ████ ████
-0.12   │                                          ████ ███
-0.06   │                                               ████
-0.0    └──────────────────────────────────────────────────→
-       labels added since this label / 此标注之后新增标注数
-        0    3    6    9   12   15   18   21   24   27   30
-```
-
-Old labels are **never deleted** — their weight approaches zero asymptotically.
-Returning to an old topic needs only a few new positive samples to override decayed evidence.
+Human labels retain equal weight while the dataset is small. The previous
+half-life of three newly labeled articles made most earlier evidence nearly
+irrelevant after one session. Interest changes should be reflected through
+updated user labels and independent validation, rather than automatic decay.
 
 ---
 
@@ -231,23 +201,19 @@ Returning to an old topic needs only a few new positive samples to override deca
               ▼
        maybe_auto_train()
               │
-              ├─ pos < 5 OR neg < 5 OR total < MIN_TOTAL (80)?
+              ├─ fewer than 80 usable labels, or fewer than 30 human labels
+              │  (including 10 positive and 10 negative)?
               │         └─ "keep collecting" → exit
               │
               ▼
-       build X (embeddings), y (labels), w (decay weights)
+       build X (embeddings), y (labels)
               │
               ▼
-       StandardScaler.fit_transform(X)
-              │
-              ▼
-       LogisticRegressionCV
-         - inner CV auto-selects C
-         - class_weight=balanced
-              │
-              ▼
-       outer StratifiedKFold validation
-         → balanced_accuracy per fold → mean ± std
+       repeated human-only held-out validation
+         - fit StandardScaler within each training fold
+         - inner CV selects C; class_weight=balanced
+         - assistant labels are training data only
+         → balanced_accuracy per run → mean ± std
               │
               ├─ mean < 0.75? → "not deployed, keep labeling"
               │
@@ -291,7 +257,9 @@ exits with `s`.
 | Classifier | `DATA_DIR/personal_model.pkl` | No | Rebuildable from feedback |
 | Scaler | `DATA_DIR/personal_scaler.pkl` | No | Rebuildable from feedback |
 
-All data files live under `DATA_DIR`. If model files are lost, run `\rate` — auto-retrain triggers after enough labels.
+All data files live under `DATA_DIR`. New web labels are evaluated at the next
+daily run; CLI labeling also triggers evaluation. A model is saved only after
+the human-held-out gate passes.
 
 ---
 
@@ -306,8 +274,8 @@ A reported `0.78 ± 0.12` means true generalization accuracy may be 0.66–0.90.
 `--chinese` only translates English articles for email output; it does not accept Chinese content as input.
 
 **Sudden interest shifts**
-Abrupt topic changes need 15–20 new labels for the model to adapt.
-Decay handles gradual drift well; sudden shifts need focused labeling sessions.
+Old labels may no longer match the current preference. Correct them explicitly
+and add new human labels; assistant-inferred labels alone cannot validate a shift.
 
 **Excerpt quality**
 Many RSS feeds provide only 2–3 sentence excerpts.

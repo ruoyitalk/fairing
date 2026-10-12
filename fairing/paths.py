@@ -19,7 +19,7 @@ File layout under DATA_DIR:
     last_run_articles.json       — (unused; reserved for future use)
     last_run_time                — timestamp of last successful run
     digest_hash                  — MD5 of last email send
-    personal_model.pkl           — deployed LogisticRegressionCV
+    personal_model.pkl           — deployed LogisticRegression
     personal_scaler.pkl          — paired StandardScaler
 """
 import os

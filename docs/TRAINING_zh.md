@@ -29,7 +29,7 @@ Daily Articles / 每日文章
                │
                ▼
 ┌──────────────────────────────────────┐
-│  LogisticRegressionCV                │
+│  LogisticRegression + 交叉验证门槛     │
 │  class_weight = balanced             │
 │  scoring = balanced_accuracy         │
 │  MIN_TOTAL = 80 labels required      │
@@ -93,7 +93,7 @@ Embedding space (2D projection / 二维投影示意)
 
 ---
 
-## 正则化：LogisticRegressionCV
+## 正则化：LogisticRegression
 
 **问题**：384 个特征，约 30 个样本 → 严重过参数化。
 
@@ -106,7 +106,7 @@ C small → strong regularization → weights pushed toward zero
 C large → weak regularization  → may overfit
 ```
 
-`LogisticRegressionCV` 通过交叉验证自动选择 C：
+`GridSearchCV` 在每轮训练折内选择 C，缩放器也只在训练折内拟合：
 
 ```
 C candidates:  0.001  0.01  0.1  1.0  10.0
@@ -158,55 +158,24 @@ A well-trained model:
 
 **部署阈值：balanced_accuracy ≥ 0.75**
 
-大致含义：推荐的文章中 75% 确实相关；被过滤掉的文章中 75% 确实不值得阅读。
+平衡准确率是正例召回率和负例召回率的平均值，不等于推荐文章的准确比例。
 
 ### 分层 K 折交叉验证
 
 ```
-n_folds = min(5, min(n_positive, n_negative))
+n_folds = min(5, min(n_human_positive, n_human_negative))
 
-Each fold preserves the positive/negative ratio.
-每折保留相同的正负比例。
+只用人工标注做留出验证。助手推断的标注可以进入训练折，但不进入测试折；
+用三种随机划分复验结果是否稳定。
 ```
 
 ---
 
-## 衰减机制
+## 标注权重
 
-### 动机
-
-兴趣随时间变化。三周前标记为"高度相关"的话题，掌握基础后可能已变成背景知识。
-
-### 以标注数量衰减（而非日历时间）
-
-遗忘速度与**阅读节奏**挂钩，而非日历时间翻页：
-- 每天标注 3 篇 → 衰减更快
-- 每周标注 3 篇 → 衰减更慢
-
-```python
-DECAY_BASE = 0.5   # weight halves each generation / 每档权重减半
-DECAY_UNIT = 3     # every 3 new labels = 1 forgetting generation / 每 3 条新标注 = 1 衰减档
-
-weight = DECAY_BASE ** floor(labels_since / DECAY_UNIT)
-```
-
-```
-Decay curve / 衰减曲线:
-
-weight │
-1.0    │████ ████ ████
-       │         ←3→
-0.5    │              ████ ████ ████
-       │                        ←3→
-0.25   │                             ████ ████ ████
-0.12   │                                          ████ ███
-0.06   │                                               ████
-0.0    └──────────────────────────────────────────────────→
-       labels added since this label / 此标注之后新增标注数
-        0    3    6    9   12   15   18   21   24   27   30
-```
-
-旧标注**永不删除**，权重趋近于零但不消失。回到旧话题时，几个新正样本即可超过衰减后的旧证据。
+样本仍少时，人工标注保持相同权重。过去“每新增三条就减半”的做法会让一次
+标注会话前的大部分证据近乎失效。兴趣变化应通过用户改标和独立验证体现，
+不靠自动衰减猜测。
 
 ---
 
@@ -228,23 +197,19 @@ weight │
               ▼
        maybe_auto_train()
               │
-              ├─ pos < 5 OR neg < 5 OR total < MIN_TOTAL (80)?
+              ├─ 有向量的标注少于 80，或人工标注少于 30
+              │  （其中正负各少于 10）？
               │         └─ "keep collecting" → exit
               │
               ▼
-       build X (embeddings), y (labels), w (decay weights)
+       build X (embeddings), y (labels)
               │
               ▼
-       StandardScaler.fit_transform(X)
-              │
-              ▼
-       LogisticRegressionCV
-         - inner CV auto-selects C
-         - class_weight=balanced
-              │
-              ▼
-       outer StratifiedKFold validation
-         → balanced_accuracy per fold → mean ± std
+       重复进行人工标注留出验证
+         - 缩放器只在每轮训练折拟合
+         - 内层交叉验证选 C，class_weight=balanced
+         - 助手标注只作训练数据
+         → 每轮 balanced_accuracy → mean ± std
               │
               ├─ mean < 0.75? → "not deployed, keep labeling"
               │
@@ -278,7 +243,8 @@ sample = random.sample(pool, min(n, len(pool)))
 | 分类器 | `DATA_DIR/personal_model.pkl` | 否 | 可从反馈重建 |
 | 缩放器 | `DATA_DIR/personal_scaler.pkl` | 否 | 可从反馈重建 |
 
-所有数据文件统一存放在 `DATA_DIR` 下。模型文件丢失时，运行 `\rate` 后，标注数量足够即自动重新训练。
+所有数据文件统一存放在 `DATA_DIR` 下。网页新增标注会在下一次日任务中评估；
+CLI 标注也会触发评估。只有人工留出验证过关才会保存模型。
 
 ---
 
@@ -293,7 +259,7 @@ sample = random.sample(pool, min(n, len(pool)))
 `--chinese` 仅将英文文章翻译用于邮件输出，不接受中文内容作为输入。
 
 **突变兴趣漂移**
-话题突然转变需要 15–20 条新标注才能让模型适应。衰减机制擅长处理渐变漂移；突变需要集中打标。
+旧标注可能不再符合当前偏好。应由用户改标并增加新的人工标注；助手推断的标注不能单独验证偏好变化。
 
 **摘要质量**
 许多 RSS 源只提供 2–3 句摘要。为对应源开启 Firecrawl 全文抓取可显著改善信号质量。

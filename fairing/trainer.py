@@ -5,7 +5,7 @@ Scientific design:
     Pre-trained semantic vectors are a strong prior; logistic regression
     on top is well-studied and interpretable.
 
-  - Classifier: LogisticRegressionCV with StandardScaler
+  - Classifier: LogisticRegression with StandardScaler
     Why LR: low parameter count relative to features, strong regularization,
     well-calibrated probabilities, fast training on small datasets.
     Why CV: automatically selects regularization strength C from a grid,
@@ -17,15 +17,14 @@ Scientific design:
     Labels will be skewed (+>> -) for most users. Balanced weighting
     ensures the minority class (usually negative) is not ignored.
 
-  - Decay: article-count-based, not time-based
-    Unit: every DECAY_UNIT newly-labeled articles = one forgetting generation.
-    Rationale: preference drift tracks reading pace, not calendar time.
-    A user who labels 3 articles/day drifts faster than one who labels 3/week.
-    Old labels are never deleted; weight approaches zero asymptotically.
+  - All human labels retain their weight while the sample is small.
+    The old half-life of three labels made most of the evidence effectively
+    disappear after a single feedback session.
 
-  - Evaluation: StratifiedKFold + balanced_accuracy
-    Balanced accuracy = mean(recall_per_class), robust to class imbalance.
-    Stratified folds preserve class ratio in each split.
+  - Evaluation: repeated nested cross-validation on human labels
+    Assistant-inferred labels may help fit a model, but never count as
+    independent evidence that it works. Scaling and C selection stay inside
+    each training fold.
 
   - Deployment threshold: balanced_accuracy >= 0.75
     Chosen conservatively; with <50 samples CV variance is high.
@@ -37,6 +36,7 @@ Storage:
   .personal_scaler.pkl    — gitignored (regenerable)
 """
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -56,12 +56,15 @@ def _ff() -> Path: return _feedback_file()
 def _mf() -> Path: return _model_file()
 def _sf() -> Path: return _scaler_file()
 
-DECAY_BASE         = 0.5
-DECAY_UNIT         = 3
 ACCURACY_THRESHOLD = 0.75
 MIN_POS            = 5
 MIN_NEG            = 5
 MIN_TOTAL          = 80   # absolute minimum before attempting any training
+MIN_HUMAN_TOTAL    = 30
+MIN_HUMAN_POS      = 10
+MIN_HUMAN_NEG      = 10
+EVALUATION_VERSION = 2
+CV_SEEDS           = (42, 43, 44)
 
 
 @dataclass
@@ -74,6 +77,9 @@ class TrainResult:
     n_folds:     int
     deployed:    bool
     C_selected:  float
+    n_human:     int = 0
+    n_assistant: int = 0
+    cv_seed_scores: tuple[float, ...] = ()
 
 
 # ── feedback I/O ──────────────────────────────────────────────────────────────
@@ -116,99 +122,127 @@ def save_feedback(entry: dict) -> None:
             os.fsync(f.fileno())
 
 
-# ── decay ─────────────────────────────────────────────────────────────────────
-
-def _label_weight(label_index: int, total: int) -> float:
-    """Article-count-based decay weight.
-
-    labels_since = how many labels were added AFTER this one.
-    generations  = floor(labels_since / DECAY_UNIT)
-    weight       = DECAY_BASE ** generations
-    """
-    labels_since = total - 1 - label_index
-    generations  = max(0, labels_since) // DECAY_UNIT
-    return DECAY_BASE ** generations
-
-
 # ── training ─────────────────────────────────────────────────────────────────
 
-def maybe_auto_train(store: dict) -> Optional[TrainResult]:
+def training_due() -> bool:
+    """A new feedback write needs one evaluation at the next scheduled run."""
+    feedback = _ff()
+    log = _log_file()
+    return feedback.exists() and (not log.exists()
+                                  or feedback.stat().st_mtime_ns > log.stat().st_mtime_ns)
+
+def maybe_auto_train(store: dict | None = None) -> Optional[TrainResult]:
     """Attempt training after a feedback session.
 
     Returns TrainResult (deployed or not) if training was attempted,
     None if there is insufficient data.
 
-    @param store: {url: entry} from embedder.load_store()
+    @param store: optional {url: entry}; omitted to stream only labeled URLs
     """
     feedback = load_feedback()
-    valid    = [(f, store[f["url"]]) for f in feedback if f["url"] in store]
+    if (len(feedback) < MIN_TOTAL
+            or sum(f["label"] == 1 for f in feedback) < MIN_POS
+            or sum(f["label"] == -1 for f in feedback) < MIN_NEG):
+        return None
+    if store is None:
+        from .embedder import _load_store
+        store = _load_store({f["url"] for f in feedback})
+    valid = []
+    for item in feedback:
+        entry = store.get(item["url"])
+        embedding = entry.get("embedding") if isinstance(entry, dict) else None
+        if isinstance(embedding, list) and len(embedding) == 384:
+            try:
+                if np.isfinite(np.asarray(embedding, dtype=float)).all():
+                    valid.append((item, entry))
+            except (TypeError, ValueError):
+                continue
 
-    pos = [v for v in valid if v[0]["label"] ==  1]
+    pos = [v for v in valid if v[0]["label"] == 1]
     neg = [v for v in valid if v[0]["label"] == -1]
+    human = [v for v in valid if v[0].get("annotator") != "assistant"]
+    human_pos = sum(v[0]["label"] == 1 for v in human)
+    human_neg = sum(v[0]["label"] == -1 for v in human)
 
-    if len(valid) < MIN_TOTAL or len(pos) < MIN_POS or len(neg) < MIN_NEG:
+    if (len(valid) < MIN_TOTAL or len(pos) < MIN_POS or len(neg) < MIN_NEG
+            or len(human) < MIN_HUMAN_TOTAL
+            or human_pos < MIN_HUMAN_POS or human_neg < MIN_HUMAN_NEG):
         logger.info(
-            "Feedback: +%d / -%d / total %d  (need +%d / -%d / total %d)",
-            len(pos), len(neg), len(valid), MIN_POS, MIN_NEG, MIN_TOTAL,
+            "Training labels: valid=%d (+%d/-%d), human=%d (+%d/-%d); insufficient",
+            len(valid), len(pos), len(neg), len(human), human_pos, human_neg,
         )
         return None
 
-    return _train(valid)
+    signature = hashlib.sha256(json.dumps(
+        [(f["url"], f["label"], f.get("annotator", "")) for f, _ in valid],
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    return _train(valid, signature)
 
 
-def _train(valid: list[tuple]) -> TrainResult:
+def _train(valid: list[tuple], signature: str) -> TrainResult:
     import joblib
-    from sklearn.linear_model import LogisticRegressionCV
-    from sklearn.model_selection import StratifiedKFold, cross_validate
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import balanced_accuracy_score
+    from sklearn.model_selection import GridSearchCV, StratifiedKFold
+    from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
     n     = len(valid)
     X_raw = np.array([v[1]["embedding"] for v in valid])
     y     = np.array([v[0]["label"]     for v in valid])
-    w     = np.array([_label_weight(i, n) for i in range(n)])
-
     n_pos = int((y ==  1).sum())
     n_neg = int((y == -1).sum())
+    human_idx = np.array([i for i, (f, _) in enumerate(valid)
+                          if f.get("annotator") != "assistant"])
+    assistant_idx = np.array([i for i, (f, _) in enumerate(valid)
+                              if f.get("annotator") == "assistant"])
+    n_folds = min(5, int((y[human_idx] == 1).sum()),
+                  int((y[human_idx] == -1).sum()))
+    grid = {"clf__C": [0.001, 0.01, 0.1, 1.0, 10.0]}
 
-    # Scale features: critical for L2-regularized logistic regression
-    scaler  = StandardScaler()
-    X       = scaler.fit_transform(X_raw)
+    def search(seed: int) -> GridSearchCV:
+        return GridSearchCV(
+            Pipeline([("scale", StandardScaler()),
+                      ("clf", LogisticRegression(class_weight="balanced",
+                                                  max_iter=2000))]),
+            grid, scoring="balanced_accuracy",
+            cv=StratifiedKFold(n_splits=3, shuffle=True,
+                               random_state=seed + 100),
+            n_jobs=1,
+        )
 
-    # Number of CV folds: limited by minority class size
-    n_folds = min(5, min(n_pos, n_neg))
+    # Every held-out row is a real user label. Proxy labels can only appear
+    # in the training fold, and both scaling and C selection are refit there.
+    seed_scores: list[float] = []
+    selected_cs: list[float] = []
+    for seed in CV_SEEDS:
+        held_truth: list[int] = []
+        held_pred: list[int] = []
+        outer = StratifiedKFold(n_splits=n_folds, shuffle=True,
+                                random_state=seed)
+        for train_rel, test_rel in outer.split(X_raw[human_idx], y[human_idx]):
+            train_idx = np.concatenate((human_idx[train_rel], assistant_idx))
+            test_idx = human_idx[test_rel]
+            candidate = search(seed)
+            candidate.fit(X_raw[train_idx], y[train_idx])
+            held_truth.extend(y[test_idx].tolist())
+            held_pred.extend(candidate.predict(X_raw[test_idx]).tolist())
+            selected_cs.append(float(candidate.best_params_["clf__C"]))
+        seed_scores.append(float(balanced_accuracy_score(held_truth, held_pred)))
 
-    # Auto-select regularization C via nested CV
-    Cs    = [0.001, 0.01, 0.1, 1.0, 10.0]
-    model = LogisticRegressionCV(
-        Cs=Cs,
-        cv=StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42),
-        class_weight="balanced",
-        max_iter=2000,
-        scoring="balanced_accuracy",
-        refit=True,
-    )
-    model.fit(X, y, sample_weight=w)
-    C_selected = float(model.C_[0])
-
-    # Evaluate: manual stratified CV to correctly pass sample_weight per fold
-    from sklearn.metrics import balanced_accuracy_score
-    from sklearn.linear_model import LogisticRegression as _LR
-
-    skf       = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
-    cv_scores_list = []
-    for tr_idx, te_idx in skf.split(X, y):
-        fold_model = _LR(C=C_selected, class_weight="balanced", max_iter=2000)
-        fold_model.fit(X[tr_idx], y[tr_idx], sample_weight=w[tr_idx])
-        y_pred = fold_model.predict(X[te_idx])
-        cv_scores_list.append(balanced_accuracy_score(y[te_idx], y_pred))
-    cv_scores = np.array(cv_scores_list)
-    cv_mean   = float(cv_scores.mean())
-    cv_std    = float(cv_scores.std())
-
+    cv_mean = float(np.mean(seed_scores))
+    cv_std = float(np.std(seed_scores))
     deployed = cv_mean >= ACCURACY_THRESHOLD
+    C_selected = float(np.median(selected_cs))
 
     if deployed:
-        joblib.dump(model,  _mf())
+        final = search(CV_SEEDS[0])
+        final.fit(X_raw, y)
+        C_selected = float(final.best_params_["clf__C"])
+        model = final.best_estimator_.named_steps["clf"]
+        scaler = final.best_estimator_.named_steps["scale"]
+        joblib.dump(model, _mf())
         joblib.dump(scaler, _sf())
         logger.info(
             "Model deployed — balanced_acc: %.2f ± %.2f  C=%.3f  n=%d",
@@ -216,7 +250,7 @@ def _train(valid: list[tuple]) -> TrainResult:
         )
     else:
         logger.info(
-            "Model not deployed — balanced_acc: %.2f ± %.2f < threshold %.2f",
+            "Model not deployed — human holdout balanced_acc: %.2f ± %.2f < threshold %.2f",
             cv_mean, cv_std, ACCURACY_THRESHOLD,
         )
 
@@ -225,6 +259,8 @@ def _train(valid: list[tuple]) -> TrainResult:
         n_samples=n, n_pos=n_pos, n_neg=n_neg,
         n_folds=n_folds, deployed=deployed,
         C_selected=C_selected,
+        n_human=len(human_idx), n_assistant=len(assistant_idx),
+        cv_seed_scores=tuple(seed_scores),
     )
 
     # Append one record to the training log for history tracking.
@@ -238,6 +274,12 @@ def _train(valid: list[tuple]) -> TrainResult:
         "cv_std":      round(cv_std, 4),
         "C":           C_selected,
         "deployed":    deployed,
+        "n_human":     len(human_idx),
+        "n_assistant": len(assistant_idx),
+        "cv_seed_scores": [round(score, 4) for score in seed_scores],
+        "evaluation":  "human_holdout_nested_cv",
+        "evaluation_version": EVALUATION_VERSION,
+        "dataset_sha256": signature,
     }
     with _log_file().open("a", encoding="utf-8") as _lf:
         _lf.write(json.dumps(log_entry) + "\n")
@@ -268,13 +310,26 @@ def model_status() -> dict:
         "n_labels":   len(feedback),
         "n_pos":      len(pos),
         "n_neg":      len(neg),
-        "decay_base": DECAY_BASE,
-        "decay_unit": DECAY_UNIT,
         "threshold":  ACCURACY_THRESHOLD,
         "min_total":  MIN_TOTAL,
         "min_pos":    MIN_POS,
         "min_neg":    MIN_NEG,
+        "min_human_total": MIN_HUMAN_TOTAL,
+        "min_human_pos": MIN_HUMAN_POS,
+        "min_human_neg": MIN_HUMAN_NEG,
     }
+
+    log_path = _log_file()
+    if log_path.exists():
+        rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+        if rows:
+            last = rows[-1]
+            status["last_evaluation"] = {
+                key: last.get(key) for key in
+                ("date", "n_samples", "n_human", "n_assistant",
+                 "cv_accuracy", "cv_std", "deployed", "evaluation")
+            }
 
     if status["deployed"]:
         import joblib

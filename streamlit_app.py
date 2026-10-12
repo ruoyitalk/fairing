@@ -29,7 +29,7 @@ from fairing.export import (
     remove_from_payload_queue,
     write_payload_queue,
 )
-from fairing.trainer import load_feedback
+from fairing.trainer import load_feedback, model_status
 from fairing.config import Config
 from fairing.editorial import feedback_by_url, is_visible
 from fairing.web_actions import active_feed_errors, record_feedback
@@ -348,7 +348,9 @@ elif page == "运行状态":
     title_idx = _read_title_index()
     today_str = datetime.now(_TZ_BJT).date().isoformat()
     today_labels = sum(1 for r in feedback if r.get("date", "") == today_str)
-    has_model = model_file().exists()
+    training = model_status()
+    last_evaluation = training.get("last_evaluation")
+    has_model = training["deployed"]
     unlabeled_count = sum(1 for a in title_idx if a.get("url") not in labeled)
 
     # ── metrics ───────────────────────────────────────────────────────────────
@@ -360,12 +362,14 @@ elif page == "运行状态":
     with col3:
         if has_model:
             st.metric("个性化筛选", "已启用")
+        elif last_evaluation:
+            st.metric("个性化筛选", "评估未达标")
         elif len(labeled) >= 80:
-            st.metric("个性化筛选", "待训练")
+            st.metric("个性化筛选", "待评估")
         else:
             st.metric("个性化筛选", "尚未启用")
 
-    st.caption("标记会立即影响单篇显示和同源排序；达到训练门槛后，模型分数才参与排序。")
+    st.caption("标记会立即影响单篇显示和同源排序；模型通过人工标注验证后才参与排序。")
 
     st.divider()
 
@@ -383,10 +387,16 @@ elif page == "运行状态":
                 st.progress(pos / len(labeled), text=f"正例比例 {pos/len(labeled):.0%}")
         else:
             prog = min(len(labeled) / 80, 1.0)
-            if len(labeled) < 80:
-                st.info(f"目前有 {len(labeled)} 条标记；达到 80 条后可训练个性化排序。")
+            if last_evaluation:
+                st.info(
+                    f"最近验证：{last_evaluation['cv_accuracy']:.0%}，"
+                    f"人工标注 {last_evaluation.get('n_human') or '—'} 条。"
+                    "上线门槛为 75%；当前继续使用来源和单篇反馈排序。"
+                )
+            elif len(labeled) < 80:
+                st.info(f"目前有 {len(labeled)} 条标记；达到 80 条后会评估模型。")
             else:
-                st.info(f"已有 {len(labeled)} 条标记，达到训练门槛；可在 CLI 完成一轮标注后触发训练。")
+                st.info(f"已有 {len(labeled)} 条标记；下次日任务会评估模型。")
             st.progress(prog)
 
     with col_b:

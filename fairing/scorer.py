@@ -1,6 +1,6 @@
 """Article relevance scorer.
 
-Only one path: personal model (LogisticRegressionCV on scaled embeddings).
+Only one path: personal model (LogisticRegression on scaled embeddings).
 If model is not deployed, articles are returned unscored (full display).
 The scaler must accompany the model — both are loaded together.
 """

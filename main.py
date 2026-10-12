@@ -534,8 +534,7 @@ def _show_log() -> None:
 
 def _show_model_status() -> None:
     from fairing.trainer import (model_status, load_feedback, tfidf_top_terms,
-                                  DECAY_BASE, DECAY_UNIT, ACCURACY_THRESHOLD,
-                                  MIN_TOTAL, MIN_POS, MIN_NEG)
+                                  ACCURACY_THRESHOLD, MIN_TOTAL, MIN_POS, MIN_NEG)
     from fairing.embedder import load_store
 
     st       = model_status()
@@ -550,7 +549,7 @@ def _show_model_status() -> None:
     t.add_column("Value", style="bold")
 
     deployed_txt = (f"[green]✓ 已部署[/green]  {st.get('train_date','')}"
-                    if st["deployed"] else "[yellow]✗ 未部署[/yellow]  (标注积累中)")
+                    if st["deployed"] else "[yellow]✗ 未部署[/yellow]  (使用规则排序)")
     t.add_row("部署状态", deployed_txt)
     t.add_row("训练样本", f"[cyan]{st['n_labels']}[/cyan] 条  "
                           f"([green]+{st['n_pos']}[/green] / [red]-{st['n_neg']}[/red])")
@@ -559,8 +558,10 @@ def _show_model_status() -> None:
         t.add_row("特征维度", f"{st.get('n_features','?')}  (all-MiniLM-L6-v2)")
 
     t.add_row("", "")
-    t.add_row("衰减 base",   f"{DECAY_BASE}  (每档权重减半)")
-    t.add_row("衰减 unit",   f"{DECAY_UNIT} 篇/档")
+    last_eval = st.get("last_evaluation")
+    if last_eval:
+        t.add_row("最近验证", f"{last_eval['cv_accuracy']:.2%}  "
+                             f"(人工 {last_eval.get('n_human') or '?'} 条)")
     t.add_row("部署阈值",    f"balanced_accuracy ≥ {ACCURACY_THRESHOLD}")
     t.add_row("最低样本",    f"总 {MIN_TOTAL} 条 / 正 {MIN_POS} / 负 {MIN_NEG}")
     t.add_row("", "")
@@ -579,7 +580,7 @@ def _show_model_status() -> None:
 
     # TF-IDF signals
     if pos or neg:
-        store     = load_store()
+        store     = load_store({f["url"] for f in feedback})
         pos_texts = [store[f["url"]]["text_for_scoring"] for f in pos if f["url"] in store]
         neg_texts = [store[f["url"]]["text_for_scoring"] for f in neg if f["url"] in store]
         top_pos   = tfidf_top_terms(pos_texts, neg_texts, n=8)
@@ -799,7 +800,7 @@ def _show_train_result(result, pos_count: int, neg_count: int, total_hist: int) 
         if total_hist  < MIN_TOTAL: gaps.append(f"总量 {total_hist}/{MIN_TOTAL}")
         if pos_count   < MIN_POS:   gaps.append(f"正样本 {pos_count}/{MIN_POS}")
         if neg_count   < MIN_NEG:   gaps.append(f"负样本 {neg_count}/{MIN_NEG}")
-        gap_str = "  |  ".join(gaps) if gaps else "数据充足，等待下次触发"
+        gap_str = "  |  ".join(gaps) if gaps else "可用向量或人工标注不足"
         console.print(Panel(
             f"训练进度  {bar}  {total_hist} / {MIN_TOTAL} 条\n"
             f"[dim]缺口：{gap_str}[/dim]",
@@ -808,20 +809,20 @@ def _show_train_result(result, pos_count: int, neg_count: int, total_hist: int) 
     elif result.deployed:
         console.print(Panel(
             f"[green]模型已自动更新[/green]\n\n"
-            f"  准确率   [bold]{result.cv_accuracy:.2%}[/bold] [dim]± {result.cv_std:.2%}[/dim]"
+            f"  人工标注验证   [bold]{result.cv_accuracy:.2%}[/bold] [dim]± {result.cv_std:.2%}[/dim]"
             f"  ({result.n_folds} 折交叉验证)\n"
             f"  参数     C = {result.C_selected:.3f}\n"
-            f"  样本数   {result.n_samples} 条"
+            f"  样本数   {result.n_samples} 条，人工 {result.n_human} 条"
             f"  ([green]+{result.n_pos}[/green] / [red]-{result.n_neg}[/red])",
             title="[bold green]训练结果[/bold green]", border_style="green",
         ))
     else:
         console.print(Panel(
             f"[yellow]评估未达部署标准[/yellow]  (需 ≥ 75%)\n\n"
-            f"  准确率   [bold]{result.cv_accuracy:.2%}[/bold] [dim]± {result.cv_std:.2%}[/dim]"
+            f"  人工标注验证   [bold]{result.cv_accuracy:.2%}[/bold] [dim]± {result.cv_std:.2%}[/dim]"
             f"  ({result.n_folds} 折)\n"
-            f"  样本数   {result.n_samples} 条\n\n"
-            f"[dim]继续标注，数据更多后精度会提升[/dim]",
+            f"  样本数   {result.n_samples} 条，人工 {result.n_human} 条\n\n"
+            f"[dim]继续使用来源和单篇反馈排序[/dim]",
             title="[bold yellow]训练结果[/bold yellow]", border_style="yellow",
         ))
 
@@ -981,15 +982,13 @@ def _run_rate(pending: dict) -> None:
             f"  本次标注   [green]+{session_pos}[/green] 有价值  /  [red]-{session_neg}[/red] 不感兴趣  =  {session_total} 篇",
             title="[bold green]任务完成[/bold green]", border_style="green",
         ))
-        store  = load_store()
-        result = maybe_auto_train(store)
+        result = maybe_auto_train()
         _show_train_result(result, pos_count, neg_count, total_hist)
 
 
 def _run_review_rate(store: dict, feedback: list[dict]) -> None:
     """Review/edit mode: flip through previously labeled articles and correct labels."""
     from fairing.trainer import save_feedback, maybe_auto_train
-    from fairing.embedder import load_store as _reload_store
 
     # Newest first; only show articles whose text is in store
     review = sorted(
@@ -1057,7 +1056,7 @@ def _run_review_rate(store: dict, feedback: list[dict]) -> None:
             f"[red]-{neg_count}[/red] 不感兴趣  =  {total_hist} 条",
             title="[bold green]复习修改完成[/bold green]", border_style="green",
         ))
-        result = maybe_auto_train(_reload_store())
+        result = maybe_auto_train()
         _show_train_result(result, pos_count, neg_count, total_hist)
     else:
         console.print(Panel(
@@ -1202,7 +1201,7 @@ def _run_ext_rate() -> None:
             title="[bold green]完成[/bold green]", border_style="green",
         ))
     if session_total > 0:
-        result = maybe_auto_train(load_store())
+        result = maybe_auto_train()
         _show_train_result(result, pos_count, neg_count, total_hist)
 
 
@@ -1469,6 +1468,19 @@ def _run_digest_locked(chinese: bool = False,
     load_dotenv(override=True)
 
     _report_label_backlog()
+
+    # Web labels take effect immediately through editorial feedback. Evaluate
+    # the personal classifier once at the next daily run, without making a
+    # click wait for a full scoring-store scan and nested cross-validation.
+    from fairing.trainer import maybe_auto_train, training_due
+    if training_due():
+        try:
+            result = maybe_auto_train()
+            if result is not None:
+                logger.info("Personal model human-holdout balanced accuracy %.3f; deployed=%s",
+                            result.cv_accuracy, result.deployed)
+        except Exception:
+            logger.exception("Personal model evaluation failed; continuing digest")
 
     elapsed_hours = _hours_since_last_run()
     if elapsed_hours > 24:
@@ -1772,7 +1784,7 @@ class Shell(cmd.Cmd):
                 if raw in ("q", ""):
                     if changed_total > 0:
                         feedback = load_feedback()
-                        result   = maybe_auto_train(load_store())
+                        result   = maybe_auto_train()
                         _show_train_result(
                             result,
                             sum(1 for f in feedback if f["label"] ==  1),
@@ -2013,7 +2025,7 @@ class Shell(cmd.Cmd):
         })
         label_str = "[green]有价值 +1[/green]" if label == 1 else "[red]不感兴趣 -1[/red]"
         console.print(f"  ✓ 已标注为 {label_str}")
-        result = maybe_auto_train(load_store())
+        result = maybe_auto_train()
         feedback_new = load_feedback()
         pos = sum(1 for f in feedback_new if f["label"] ==  1)
         neg = sum(1 for f in feedback_new if f["label"] == -1)
@@ -2138,7 +2150,7 @@ class Shell(cmd.Cmd):
             feedback = load_feedback()
             pos = sum(1 for f in feedback if f["label"] ==  1)
             neg = sum(1 for f in feedback if f["label"] == -1)
-            _show_train_result(maybe_auto_train(load_store()), pos, neg, len(feedback))
+            _show_train_result(maybe_auto_train(), pos, neg, len(feedback))
 
     def do_label_review(self, _line: str) -> None:
         """Review labels where the model strongly disagrees with your judgment.
@@ -2258,7 +2270,7 @@ class Shell(cmd.Cmd):
                 input("  [回车继续]")
 
         if changed:
-            result   = maybe_auto_train(load_store())
+            result   = maybe_auto_train()
             feedback = load_feedback()
             pos = sum(1 for f in feedback if f["label"] ==  1)
             neg = sum(1 for f in feedback if f["label"] == -1)
