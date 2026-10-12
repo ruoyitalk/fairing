@@ -49,7 +49,7 @@ _TZ_BJT = timezone(timedelta(hours=8))
 st.set_page_config(
     page_title="Fairing · 资讯",
     page_icon="📰",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="expanded",
 )
 
@@ -73,8 +73,8 @@ _google_authenticated = bool(
 )
 
 if not (_local_authenticated or _google_authenticated):
-    st.title("Fairing 资讯")
-    st.caption("登录后查看订阅和摘要")
+    st.title("Fairing")
+    st.caption("日摘、文章和稍后阅读。")
 
     if getattr(st.user, "is_logged_in", False):
         email = user_email(st.user)
@@ -82,14 +82,9 @@ if not (_local_authenticated or _google_authenticated):
         if st.button("退出 Google 账号"):
             st.logout()
     else:
-        google_col, key_col = st.columns(2)
-        with google_col:
-            st.subheader("Google 登录")
-            st.write("使用允许列表中的 Google 账号。")
-            if st.button("使用 Google 登录", type="primary", use_container_width=True):
-                st.login("google")
-        with key_col:
-            st.subheader("Homeserver 密钥")
+        if st.button("使用 Google 登录", type="primary", use_container_width=True):
+            st.login("google")
+        with st.expander("使用 Homeserver 密钥"):
             submitted_key = st.text_input("密钥", type="password")
             if st.button("使用密钥登录", use_container_width=True):
                 if homeserver_key_matches(submitted_key, _homeserver_key):
@@ -181,6 +176,20 @@ def _build_label_pool() -> list[dict]:
     return pool
 
 
+def _article_preview(article: dict, *, date_field: str, excerpt_length: int = 0) -> None:
+    """Show one article without interpreting feed text as Markdown."""
+    with st.container(border=True):
+        st.markdown(f"**{plain_markdown(article.get('title') or '无标题')}**")
+        source = article.get("source") or "未知来源"
+        published = article.get(date_field) or "日期未知"
+        st.caption(plain_markdown(f"{source} · {published}"))
+        summary = str(article.get("summary") or "")
+        if excerpt_length and summary:
+            excerpt = summary[:excerpt_length]
+            st.markdown(plain_markdown(excerpt) + ("…" if len(summary) > excerpt_length else ""))
+        st.link_button("阅读原文", article["url"])
+
+
 # ── sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("Fairing")
@@ -193,7 +202,7 @@ with st.sidebar:
     queue_sb = load_payload_queue()
 
     st.metric("已标记", len(labeled_sb))
-    st.metric("收录记录", len(title_idx_sb))
+    st.metric("收录文章", len(title_idx_sb))
     st.metric("待保存", len(queue_sb) if isinstance(queue_sb, list) else 0)
 
     lrf = last_run_time_file()
@@ -219,54 +228,43 @@ with st.sidebar:
     )
 
 if page == "最新资讯":
-    st.header("最新资讯")
-    st.caption("先看日摘，再按来源和标题找原文。")
-    digest = _read_latest_digest()
-    if digest:
-        digest_path, digest_day, digest_chinese, digest_articles = digest
-        featured = select_digest_articles(digest_articles)
-        st.subheader("最近一期日摘")
-        st.caption(f"{digest_day} · {'中文' if digest_chinese else '英文'} · 从 {len(digest_articles)} 篇中显示 {len(featured)} 篇，优先 AI 来源")
-        for article in featured:
-            with st.container(border=True):
-                st.markdown(f"### {plain_markdown(article['title'])}")
-                st.caption(plain_markdown(f"{article['source'] or '未知来源'} · {article['published'] or '日期未知'}"))
-                if article["summary"]:
-                    st.markdown(plain_markdown(article["summary"][:320]))
-                st.link_button("阅读原文", article["url"])
-        if len(digest_articles) > len(featured):
-            st.caption("完整日摘可下载查看。")
-        st.download_button(
-            "下载完整日摘", digest_path.read_bytes(), file_name=digest_path.name,
-            mime="text/markdown",
-        )
+    st.title("资讯")
+    view = st.radio("阅读范围", ["本期日摘", "文章库"], horizontal=True,
+                    label_visibility="collapsed")
+    if view == "本期日摘":
+        digest = _read_latest_digest()
+        if digest:
+            digest_path, digest_day, digest_chinese, digest_articles = digest
+            featured = select_digest_articles(digest_articles)
+            st.caption(f"{digest_day} · {'中文' if digest_chinese else '英文'} · 本期 {len(featured)} 篇")
+            for article in featured:
+                _article_preview(article, date_field="published", excerpt_length=180)
+            if len(digest_articles) > len(featured):
+                st.caption(f"完整日摘另有 {len(digest_articles) - len(featured)} 篇。")
+            st.download_button(
+                "下载本期 Markdown", digest_path.read_bytes(), file_name=digest_path.name,
+                mime="text/markdown",
+            )
+        else:
+            st.info("还没有日摘。定时任务运行后会显示在这里。")
     else:
-        st.info("还没有日摘。定时任务运行后会显示在这里。")
-
-    st.divider()
-    st.subheader("按标题查找")
-    all_articles = _read_title_index()
-    sources = sorted({str(item.get("source")) for item in all_articles if item.get("source")})
-    search_col, source_col = st.columns([2, 1])
-    with search_col:
+        all_articles = _read_title_index()
+        sources = sorted({str(item.get("source")) for item in all_articles if item.get("source")})
+        st.caption("按标题或来源查找已收录的文章。")
         query = st.text_input("搜索标题或来源")
-    with source_col:
         selected_source = st.selectbox("来源", ["全部来源", *sources])
-    articles = latest_articles(
-        all_articles, query=query,
-        source="" if selected_source == "全部来源" else selected_source,
-    )
-    if not all_articles:
-        st.info("还没有收录文章。定时任务运行后再来查看。")
-    elif not articles:
-        st.info("没有找到符合条件的文章。")
-    else:
-        st.caption(f"显示最近 {len(articles)} 篇")
-        for article in articles:
-            with st.container(border=True):
-                st.markdown(f"### {plain_markdown(article.get('title') or '无标题')}")
-                st.caption(plain_markdown(f"{article.get('source') or '未知来源'} · {article.get('date') or '日期未知'}"))
-                st.link_button("阅读原文", article["url"])
+        articles = latest_articles(
+            all_articles, query=query,
+            source="" if selected_source == "全部来源" else selected_source,
+        )
+        if not all_articles:
+            st.info("还没有收录文章。定时任务运行后再来查看。")
+        elif not articles:
+            st.info("没有找到符合条件的文章。")
+        else:
+            st.caption(f"显示 {len(articles)} 篇，最多 30 篇。")
+            for article in articles:
+                _article_preview(article, date_field="date")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: DASHBOARD
@@ -417,7 +415,7 @@ elif page == "标记文章":
             summary = article.get("summary", "")
             if summary:
                 st.divider()
-                st.markdown(summary[:500] + ("…" if len(summary) > 500 else ""))
+                st.markdown(plain_markdown(summary[:500]) + ("…" if len(summary) > 500 else ""))
 
         # Label buttons
         st.markdown("**这篇文章对你有价值吗？**")
@@ -471,8 +469,8 @@ elif page == "待保存":
             with st.container(border=True):
                 col_t, col_del = st.columns([5, 1])
                 with col_t:
-                    st.markdown(f"**{item.get('title', '无标题')}**")
-                    st.caption(item.get("source", "—"))
+                    st.markdown(f"**{plain_markdown(item.get('title', '无标题'))}**")
+                    st.caption(plain_markdown(item.get("source", "—")))
                     url = item.get("url", "")
                     if is_web_url(url):
                         st.link_button("阅读原文", url)
@@ -496,7 +494,10 @@ elif page == "待保存":
             for a in results:
                 col_r, col_add = st.columns([5, 1])
                 with col_r:
-                    st.write(f"**{a.get('title','')[:70]}** — {a.get('source','')}")
+                    st.markdown(
+                        f"**{plain_markdown(a.get('title', '')[:70])}** — "
+                        f"{plain_markdown(a.get('source', ''))}"
+                    )
                 with col_add:
                     url = a.get("url", "")
                     aid = article_id_for(url)
