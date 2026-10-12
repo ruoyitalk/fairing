@@ -47,7 +47,6 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
   # Test the built artifact itself. Mounting the mutable checkout here could
   # validate code that is not actually present in the image.
   docker run --rm '$IMAGE' pytest -q
-  previous_image=\"\$(docker inspect -f '{{.Config.Image}}' fairing 2>/dev/null || true)\"
   current_week=\"\$(date +%G-W%V)\"
   install -d -o root -g root -m 2775 /data/news \"/data/news/\$current_week\"
   if [[ -f \"/data/news/\$current_week/\$(date +%F).md\" ]]; then
@@ -92,7 +91,6 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       --cap-drop ALL \\
       --security-opt no-new-privileges:true \\
       --network docker_proxy \\
-      --gpus all \\
       -p 127.0.0.1:8501:8501 \\
       --env-file '$REMOTE_ENV_FILE' \\
       -e FAIRING_SECRET_DIR=/run/homeserver-secrets \\
@@ -100,6 +98,7 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       -e HOME=/tmp/fairing-home \\
       -e HF_HOME=/cache/huggingface \\
       -e HF_HUB_OFFLINE=1 \\
+      -e CUDA_VISIBLE_DEVICES= \\
       -e DATA_DIR=/data/fairing \\
       -e FAIRING_ROOT=/fairing \\
       -e PAYLOAD_ROOT=/payload \\
@@ -118,8 +117,19 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       -v /opt/docker/hf_cache:/cache/huggingface:ro \\
       \"\$image\" >/dev/null
   }
-  docker stop fairing >/dev/null 2>&1 || true
-  docker rm fairing >/dev/null 2>&1 || true
+  docker rm -f fairing-previous >/dev/null 2>&1 || true
+  if docker inspect fairing >/dev/null 2>&1; then
+    docker stop fairing >/dev/null
+    docker rename fairing fairing-previous
+  fi
+  rollback() {
+    docker rm -f fairing >/dev/null 2>&1 || true
+    if docker inspect fairing-previous >/dev/null 2>&1; then
+      docker rename fairing-previous fairing
+      docker start fairing >/dev/null
+    fi
+  }
+  trap rollback ERR
   run_fairing '$IMAGE'
   healthy=0
   for attempt in \$(seq 1 45); do
@@ -133,9 +143,7 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
   fi
   if [[ \"\$healthy\" != 1 ]]; then
     docker logs --tail 100 fairing >&2 || true
-    docker stop fairing >/dev/null 2>&1 || true
-    docker rm fairing >/dev/null 2>&1 || true
-    if [[ -n \"\$previous_image\" ]]; then run_fairing \"\$previous_image\"; fi
+    rollback
     exit 1
   fi
   install -o root -g root -m 0755 '$REMOTE_DIR/deploy/fairing-daily-run' /usr/local/sbin/fairing-daily-run
@@ -150,6 +158,7 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
   rm -f \"\$cron_file\"
   trap - EXIT
   runuser -u jieker -- /usr/local/sbin/sync-fairing-cron
+  trap - ERR
   docker inspect fairing --format 'image={{.Config.Image}} revision={{index .Config.Labels \"org.opencontainers.image.revision\"}} state={{.State.Status}}/{{.State.Health.Status}} restarts={{.RestartCount}}'
 "
 
