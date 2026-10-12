@@ -6,20 +6,15 @@ Pipeline contract:
   The base pipeline (MD, NotebookLM, embeddings) always stays in English.
   --chinese adds a *parallel* Chinese note; it does not alter English output.
 
-Backend selection via TRANSLATOR env var:
-
-  TRANSLATOR=gemini    GEMINI_API_KEY=AIza...           (default, free tier)
-  TRANSLATOR=openai    OPENAI_API_KEY=sk-...            (OpenAI or compatible)
-  TRANSLATOR=claude    ANTHROPIC_API_KEY=sk-ant-...
-
-Any OpenAI-compatible API (Groq, Together, Mistral, etc.) works via the
-openai backend by setting OPENAI_BASE_URL to the provider endpoint.
+The free-only route uses a locally hosted Ollama model. No external model
+provider is invoked, even when old API keys remain in the environment.
 """
 import json
 import logging
 import os
 import re
 import time
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -60,61 +55,42 @@ def _apply_fallback(articles: list[dict]) -> None:
         a.setdefault("summary_zh", a.get("excerpt", ""))
 
 
-# ── LLM backends ──────────────────────────────────────────────────────────────
+# ── local model backend ──────────────────────────────────────────────────────
 
-def _call_gemini(prompt: str) -> str:
-    from google import genai
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    model   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-    client  = genai.Client(api_key=api_key)
-    resp    = client.models.generate_content(model=model, contents=prompt)
-    return resp.text
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "ollama"})
+_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 
-def _call_openai(prompt: str) -> str:
-    """Works for OpenAI and any OpenAI-compatible API (Groq, Together, Mistral, etc.)."""
-    from openai import OpenAI
-    api_key  = os.environ.get("OPENAI_API_KEY", "")
-    model    = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-    base_url = os.environ.get("OPENAI_BASE_URL") or None
-    client   = OpenAI(api_key=api_key, base_url=base_url)
-    resp     = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
+def _ollama_endpoint() -> str:
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    parsed = urlsplit(base_url)
+    if (parsed.scheme != "http" or parsed.hostname not in _LOCAL_HOSTS
+            or parsed.username or parsed.password or parsed.path not in ("", "/")
+            or parsed.query or parsed.fragment):
+        raise ValueError("OLLAMA_BASE_URL must be a local HTTP Ollama service")
+    return base_url.rstrip("/") + "/api/generate"
+
+
+def _call_ollama(prompt: str) -> str:
+    import requests
+
+    model = os.environ.get("OLLAMA_MODEL", "").strip()
+    if not _MODEL_RE.fullmatch(model):
+        raise ValueError("OLLAMA_MODEL must name an installed local model")
+    response = requests.post(
+        _ollama_endpoint(),
+        json={"model": model, "prompt": prompt, "stream": False},
+        timeout=120,
     )
-    return resp.choices[0].message.content
-
-
-def _call_claude(prompt: str) -> str:
-    import anthropic
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    model   = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-20240307")
-    client  = anthropic.Anthropic(api_key=api_key)
-    msg     = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return msg.content[0].text
-
-
-_BACKENDS: dict[str, callable] = {
-    "gemini": _call_gemini,
-    "openai": _call_openai,
-    "claude": _call_claude,
-}
+    response.raise_for_status()
+    return str(response.json().get("response", ""))
 
 
 def _call_llm(prompt: str) -> str:
-    backend = os.environ.get("TRANSLATOR", "gemini").lower()
-    fn = _BACKENDS.get(backend)
-    if fn is None:
-        raise ValueError(
-            f"Unknown TRANSLATOR={backend!r}. "
-            f"Valid: {', '.join(_BACKENDS)}"
-        )
-    return fn(prompt)
+    backend = os.environ.get("TRANSLATOR", "ollama").lower()
+    if backend != "ollama":
+        raise ValueError("free-only translation supports only local Ollama")
+    return _call_ollama(prompt)
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -126,21 +102,23 @@ def translate(articles: list[dict], api_key: str = "",
     Operates on English input only — CJK articles are excluded upstream
     in rss.py. This function translates FROM English TO Chinese.
 
-    Backend and credentials via environment variables:
-      TRANSLATOR      gemini (default) | openai | claude
-      GEMINI_API_KEY  for gemini (free tier at aistudio.google.com)
-      OPENAI_API_KEY  for openai / openai-compatible APIs
-      OPENAI_BASE_URL provider endpoint override (Groq, Together, etc.)
-      ANTHROPIC_API_KEY for claude
+    Backend via environment variables:
+      TRANSLATOR      ollama (default)
+      OLLAMA_BASE_URL local Ollama service, default http://127.0.0.1:11434
+      OLLAMA_MODEL    installed local model; if absent, keep English text
 
     Falls back to raw English excerpt on any error, never raises.
 
     @param articles:   English article dicts to translate
-    @param api_key:    ignored (backward compat); use GEMINI_API_KEY env var
-    @param model_name: ignored (backward compat); use *_MODEL env vars
+    @param api_key:    ignored (backward compatibility)
+    @param model_name: ignored (backward compatibility)
     """
-    backend = os.environ.get("TRANSLATOR", "gemini")
+    backend = os.environ.get("TRANSLATOR", "ollama")
     logger.info("Translator backend: %s (EN → ZH)", backend)
+    if backend.lower() != "ollama" or not os.environ.get("OLLAMA_MODEL", "").strip():
+        logger.warning("local Ollama translation unavailable; keeping English source text")
+        _apply_fallback(articles)
+        return articles
 
     failed = 0
     for i in range(0, len(articles), _BATCH_SIZE):

@@ -16,7 +16,7 @@ fairing uses a three-tier labeling system. All tiers write to the same `feedback
         │
         ▼
 \rate  (Tier 1 — Mandatory Daily Batch)
-  └─ _run_rate()   label today's sample (random order); rate-gate blocks next \r
+  └─ _run_rate()   optionally label today's sample (random order)
         │
         ▼
 \rate --ext  (Tier 2 — Extended Labeling)
@@ -119,16 +119,9 @@ On each card, the following keys are accepted:
 
 After each `+` or `-`, `save_feedback()` appends to `feedback.jsonl` and calls `maybe_auto_train()`.
 
-### Rate-Gate
+### Label status
 
-After `\r`, `rate_pending.json` is written. The next `\r` checks:
-
-```
-if rate_pending exists AND completed=false:
-    block run with warning — "complete \rate first, or use --force"
-```
-
-Use `\r --force` to bypass. The gate exists to ensure at least one daily labeling session. `completed` is automatically set when today's label count (from any source) reaches `n`.
+After `\r`, `rate_pending.json` is still written for optional training. Incomplete labels do not block the next digest. `completed` is automatically set when today's label count (from any source) reaches `n`.
 
 ---
 
@@ -138,7 +131,7 @@ Use `\r --force` to bypass. The gate exists to ensure at least one daily labelin
 
 `\rate --ext` requires both:
 1. `rate_pending.json` exists.
-2. `rate_pending.completed == true` (today's mandatory batch is done).
+2. `rate_pending.completed == true` (today's optional batch was completed).
 
 If either condition fails, the command is blocked with an explanation.
 

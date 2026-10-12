@@ -1,0 +1,18 @@
+# Public feeds only. Export with `python -m fairing.opml` for a local reader trial.
+# Private feeds in sources.local.yaml are never read by the exporter.
+sources:
+  - OpenAI News
+  - NVIDIA Developer Blog
+  - Lilian Weng
+  - Eugene Yan
+  - Anthropic Engineering
+  - arXiv cs.AI/cs.CL/cs.LG
+  - Latent Space
+  - Gwern
+  - Dwarkesh Podcast
+  - Simon Willison
+  - One Useful Thing
+  - Import AI
+  - HuggingFace Blog
+  - Google DeepMind Blog
+  - Google AI Blog

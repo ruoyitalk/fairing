@@ -15,8 +15,8 @@ fairing 采用三层打标体系。三层均写入同一个 `feedback.jsonl`，�
   └─ _save_pending()          抽样 → rate_pending.json
         │
         ▼
-\rate  （第一层 — 每日必需批次）
-  └─ _run_mandatory_rate()   完成今日采样；rate-gate 阻断下次 \r
+\rate  （第一层 — 每日可选批次）
+  └─ _run_mandatory_rate()   可选地标注今日采样；不阻断日报
         │
         ▼
 \rate --ext  （第二层 — 扩展打标）
@@ -88,7 +88,7 @@ fairing 见过的所有文章索引。作为 `\rate --ext` 和 `\lb` 的候选�
 
 ---
 
-## 第一层 — 每日必需批次（`\rate`）
+## 第一层 — 每日可选批次（`\rate`）
 
 ### 目标数量：`_calc_sample_n()`
 
@@ -117,16 +117,9 @@ n = min(8, max(3, len(articles) // 4))   # 3–8 篇，与当日文章数成比�
 
 每次 `+` 或 `-` 后，`save_feedback()` 追加写入 `feedback.jsonl` 并调用 `maybe_auto_train()`。
 
-### Rate-Gate（打标门禁）
+### 标注状态
 
-`\r` 结束后写入 `rate_pending.json`。下次 `\r` 检查：
-
-```
-若 rate_pending 存在 且 completed=false：
-    阻断运行，提示"请先完成 \rate，或使用 --force 强制执行"
-```
-
-使用 `\r --force` 可跳过门禁。该机制确保每日至少完成一次打标。任何渠道的今日标注数达到 `n` 后，`completed` 自动置 `true`。
+`\r` 结束后仍写入 `rate_pending.json`，但未完成的标注不阻断下次日报。任何渠道的今日标注数达到 `n` 后，`completed` 自动置 `true`。
 
 ---
 

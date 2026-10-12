@@ -11,10 +11,15 @@
 #   category          used for grouping in output
 #   tags              semantic labels for fan-out routing (see subscriptions.yaml)
 #   firecrawl_fulltext  true = enrich with full article body before embedding.
-#                       Search Gateway is preferred when configured; Firecrawl
-#                       and local HTTP are fallback paths.
+#                       Search Gateway is preferred when configured; local
+#                       HTTP is the fallback. Hosted scraping is disabled.
 
 rss:
+  - name: OpenAI News
+    url: https://openai.com/news/rss.xml
+    category: AI / Official News
+    tags: [ai, ai_research, ai_engineering]
+
   # ── Databases & Data Platform ────────────────────────────────────────────────
   - name: ClickHouse Blog
     url: https://clickhouse.com/rss.xml

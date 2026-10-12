@@ -17,6 +17,7 @@ fairing is a personal RSS digest tool with an active-learning relevance classifi
 | [docs/BACKUP.md](docs/BACKUP.md) | Backup and restore reference |
 | [docs/PAYLOAD.md](docs/PAYLOAD.md) | Payload queue integration: `\ps`, `\sd`, `\pd` |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Full operations manual: all commands, troubleshooting |
+| [docs/FREE_READER_PILOT.md](docs/FREE_READER_PILOT.md) | Local Miniflux/FreshRSS comparison with public AI feeds |
 
 ---
 
@@ -35,21 +36,13 @@ pip install -r requirements.txt
 ### 2. Configure `.env`
 
 ```bash
-# Required
-SMTP_USER=your_address@163.com
-SMTP_PASSWORD=your_163_auth_code
-MAIL_TO=recipient@example.com
-GEMINI_API_KEY=AIzaSy...
-
-# Output directory (daily digests + NotebookLM files)
-NEWS_DIR=~/files/coding/ruoyi_talk/news
-
-# Multi-device sync
-# DATA_DIR=~/OneDrive/fairing
+# Local output; the free reader pilot needs no SMTP or model API key.
+NEWS_DIR=~/Documents/fairing-news
+DATA_DIR=~/Documents/fairing-data
 
 # Run behavior defaults
 # RUN_CHINESE=false
-# RUN_NO_MAIL=false
+# RUN_NO_MAIL=true
 # RUN_MD=true
 # RUN_NOTEBOOK=true
 # MAIL_SPLIT_N=2
@@ -68,12 +61,21 @@ cp config/sources.local.yaml.example config/sources.local.yaml
 python main.py
 ```
 
-Inside the shell: `\r` to run the first digest, then `\rate` to complete today's labeling.
+Inside the shell: `\r` to run the first digest. `\rate` is optional feedback
+and never blocks the next digest.
 
 For cron / non-interactive use:
 
 ```bash
-python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
+python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook]
+```
+
+For a free local reader trial, export the reviewed 15 public AI feeds and
+import the OPML into self-hosted Miniflux or FreshRSS. This command never reads
+`sources.local.yaml` or exports private feeds:
+
+```bash
+python -m fairing.opml --output /tmp/fairing-ai-pilot.opml
 ```
 
 ---
@@ -82,8 +84,8 @@ python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
 
 | Shortcut | Command | Params | Description |
 |----------|---------|--------|-------------|
-| `\r` | `run` | `[--no-mail] [--chinese] [--force]` | Full pipeline: RSS → embed → score → write digest → email → backup |
-| `\rate` | `rate` | `[--ext]` | Mandatory daily labeling sample; `--ext` extends to all unlabeled |
+| `\r` | `run` | `[--no-mail] [--chinese]` | Full pipeline: RSS → embed → score → write digest → email → backup |
+| `\rate` | `rate` | `[--ext]` | Optional labeling; `--ext` extends to all unlabeled |
 | `\lb` | `label_browser` | `[keywords]` | Browse and edit labeled articles by keyword search |
 | `\ms` | `model_status` | | Classifier status, training history, signal words |
 | `\slr` | `suspect` | | Review labels where model disagrees (>60% divergence) |
@@ -144,17 +146,17 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SMTP_USER` | Yes | — | 163 SMTP sender address |
-| `SMTP_PASSWORD` | Yes | — | 163 app password |
-| `MAIL_TO` | Yes | — | Recipient email |
-| `GEMINI_API_KEY` | Yes* | — | Gemini key for translation (not needed if always English) |
+| `SMTP_USER` | Email only | — | 163 SMTP sender address |
+| `SMTP_PASSWORD` | Email only | — | 163 app password |
+| `MAIL_TO` | Email only | — | Recipient email |
+| `OLLAMA_MODEL` | No | — | Already installed local model for optional Chinese translation; otherwise keep English |
+| `OLLAMA_BASE_URL` | No | `http://127.0.0.1:11434` | Local Ollama endpoint |
 | `DATA_DIR` | No | project root | All runtime data files |
 | `BACKUP_DIR` | No | `~/Documents/fairing/data_bak` | Backup destination |
 | `NEWS_DIR` | No | `~/Documents/fairing-news` | Root output directory; daily digests → `NEWS_DIR/YYYY-WXX/`; NotebookLM → `NEWS_DIR/notebooklm/` |
 | `SEARCH_GATEWAY_URL` / `SG_URL` | No | — | Preferred full-text fetch gateway for configured sources |
 | `SEARCH_GATEWAY_API_KEY` | No | — | API key for Search Gateway when required |
-| `FIRECRAWL_API_KEY` | No | — | Fallback full-text enrichment provider |
-| `TRANSLATOR` | No | `gemini` | Translation backend: `gemini` / `openai` / `claude` |
+| `TRANSLATOR` | No | `ollama` | Only local Ollama is supported by the free-only route |
 | `MAIL_SPLIT_N` | No | _(off)_ | Split digest email into N parts |
 | `TOP_N` | No | `20` | Articles shown in full detail in email |
 | `RUN_MD` | No | `true` | Permanent disable Obsidian: set `false` |
@@ -170,7 +172,7 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 | `url` | — | RSS/Atom feed URL |
 | `category` | `General` | Grouping in Obsidian notes and email |
 | `tags` | `[]` | Semantic labels used by subscriber fan-out |
-| `firecrawl_fulltext` | `false` | Enrich the article with full text before embedding; Search Gateway is preferred when configured, with Firecrawl/local HTTP as fallbacks |
+| `firecrawl_fulltext` | `false` | Historical field name: enrich before embedding through Search Gateway, then local HTTP; hosted scraping is disabled |
 
 Lookback hours are now dynamic (see [OPERATIONS.md](docs/OPERATIONS.md) — Dynamic Lookback). The `lookback_hours` field is no longer used per-source.
 

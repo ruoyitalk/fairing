@@ -208,7 +208,7 @@ def _mask(key: str, value: str) -> str:
     return value
 
 
-# ── rate-gate ─────────────────────────────────────────────────────────────────
+# ── optional labeling state ──────────────────────────────────────────────────
 
 def _load_pending() -> dict:
     if not RATE_PENDING().exists():
@@ -240,20 +240,12 @@ def _today_label_count() -> int:
                if f.get("date") == today and f["label"] in (1, -1))
 
 
-def _check_rate_gate(force: bool = False) -> bool:
+def _report_label_backlog() -> None:
     pending = _load_pending()
-    if pending and not pending.get("completed", True) and not force:
+    if pending and not pending.get("completed", True):
         n    = pending.get("n", 0)
         done = _today_label_count()
-        console.print(Panel(
-            f"[yellow]今日打标任务尚未完成[/yellow]  ({done}/{n} 篇)\n\n"
-            f"完成标注后才能拉取新文章，避免训练数据断档。\n"
-            f"  · 继续标注：[cyan]\\rate[/cyan]\n"
-            f"  · 强制跳过：[dim]run --force[/dim]（不推荐）",
-            title="[red bold]待完成标注[/red bold]", border_style="red",
-        ))
-        return False
-    return True
+        logger.info("Optional article labels pending: %d/%d; digest continues", done, n)
 
 
 # ── env ───────────────────────────────────────────────────────────────────────
@@ -1280,7 +1272,7 @@ def _show_shortcuts() -> None:
         (r"\r",    "run",          "[--no-mail] [--chinese] [--force]",
                                                                "拉取 RSS · 嵌入评分 · 写摘要 · 发邮件  （参数默认值见下方）"),
         ("",       "",             "",                          ""),
-        (r"\rate", "rate",         "[--ext]",                   "必需打标（未完成阻塞 \\r）；--ext 扩展全量未标文章新→旧"),
+        (r"\rate", "rate",         "[--ext]",                   "可选文章标注；--ext 扩展全量未标文章新→旧"),
         (r"\lb",   "labels",       "[英文关键词]",              "标注记录管理：搜索 · 翻页 · 修改"),
         ("",       "",             "",                          ""),
         (r"\ms",   "model_status", "",                          "分类器状态 · 训练历史 · 语义信号词"),
@@ -1454,9 +1446,8 @@ def run_digest(chinese: bool = False,
                no_mail: bool = False, force: bool = False) -> bool:
     """Run the digest pipeline and report whether it reached a valid terminal state.
 
-    Interactive callers may ignore the result because the console already explains
-    why a run was blocked.  Non-interactive callers must treat ``False`` as a
-    temporary failure so schedulers cannot record a skipped run as completed.
+    Non-interactive callers must treat ``False`` as a temporary failure so
+    schedulers cannot record a skipped run as completed.
     """
     from dotenv import load_dotenv
     load_dotenv(override=True)
@@ -1476,14 +1467,12 @@ def _run_digest_locked(chinese: bool = False,
 
     @param chinese: translate email to Chinese (MD stays English)
     @param no_mail: skip sending the digest email
-    @param force:   bypass the rate-gate check (skip pending label warning)
+    @param force:   deprecated compatibility flag; labels never block delivery
     """
     from dotenv import load_dotenv
     load_dotenv(override=True)
 
-    if not _check_rate_gate(force):
-        logger.warning("Daily run blocked by the incomplete labeling task")
-        return False
+    _report_label_backlog()
 
     elapsed_hours = _hours_since_last_run()
     if elapsed_hours > 24:
@@ -1498,7 +1487,6 @@ def _run_digest_locked(chinese: bool = False,
     from fairing.state import filter_unseen, mark_seen
 
     cfg        = Config()
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
     prune_feed_errors({src.name for src in cfg.rss_sources if src.enabled})
 
     logger.info("=== Fetching RSS feeds ===")
@@ -1542,9 +1530,9 @@ def _run_digest_locked(chinese: bool = False,
     else:
         email_articles = articles
         if chinese:
-            translator_key = os.environ.get("GEMINI_API_KEY", "")
-            if not translator_key and os.environ.get("TRANSLATOR", "gemini") == "gemini":
-                logger.warning("--chinese: GEMINI_API_KEY not set — email sent in English")
+            if (os.environ.get("TRANSLATOR", "ollama").lower() != "ollama"
+                    or not os.environ.get("OLLAMA_MODEL", "").strip()):
+                logger.warning("--chinese: local Ollama translation unavailable — email sent in English")
             else:
                 from fairing.translator import translate
                 import copy
@@ -1612,7 +1600,7 @@ class Shell(cmd.Cmd):
   Flags:
     --no-mail     skip email notification
     --chinese     email in Chinese (MD stays English)
-    --force       bypass rate gate (emergency use)"""
+    --force       deprecated no-op, retained for older callers"""
         _clear()
         args          = line.split()
         defaults      = _load_run_defaults()
@@ -1629,7 +1617,7 @@ class Shell(cmd.Cmd):
         """Label articles for training.
 
   Usage:
-    rate          mandatory daily batch — today's sampled articles (rate-gate)
+    rate          optional daily batch — today's sampled articles
     rate --ext    extended: all unlabeled articles newest-first (requires daily done)
                   English titles only; case-insensitive; no time-window limit"""
         _clear()
@@ -2487,14 +2475,14 @@ class Shell(cmd.Cmd):
 
         email_articles = articles
         if translate:
-            translator_key = os.environ.get("GEMINI_API_KEY", "")
-            if translator_key:
+            if (os.environ.get("TRANSLATOR", "ollama").lower() == "ollama"
+                    and os.environ.get("OLLAMA_MODEL", "").strip()):
                 from fairing.translator import translate as _translate
                 import copy
                 console.print("  [dim]正在翻译...[/dim]")
                 email_articles = _translate(copy.deepcopy(articles))
             else:
-                console.print("  [yellow]GEMINI_API_KEY 未配置，以英文发送[/yellow]")
+                console.print("  [yellow]本地 Ollama 翻译未配置，以英文发送[/yellow]")
 
         is_resend = not is_today
         console.print(

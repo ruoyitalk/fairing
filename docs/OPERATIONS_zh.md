@@ -10,12 +10,12 @@
 
 ```
 1. \r                      拉取 RSS、评分、写文件、发邮件、备份、抽取待标样本
-2. \rate                   完成今日必需打标批次（3–8 篇）
+2. \rate（可选）            标注感兴趣的文章，帮助后续排序
 3. \rate --ext（可选）      从历史候选池继续打标
 4. \lb（可选）              搜索并修正历史标注
 ```
 
-rate-gate 确保同一天内不重复执行 `\r`，除非先完成 `\rate` 或使用 `--force`。
+标注积压只记日志，不阻断日报。`--force` 保留为兼容旧脚本的无操作参数。
 
 ---
 
@@ -24,7 +24,7 @@ rate-gate 确保同一天内不重复执行 `\r`，除非先完成 `\rate` 或�
 ### `\r` — 运行日报
 
 ```
-\r [--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]
+\r [--no-md] [--no-notebook] [--no-mail] [--chinese]
 ```
 
 完整流水线。执行顺序：
@@ -33,7 +33,7 @@ rate-gate 确保同一天内不重复执行 `\r`，除非先完成 `\rate` 或�
 2. `filter_unseen()` — 两层去重：规范化 URL + 规范化标题。
 3. 可选：对已配置源进行全文补充。配置 `SEARCH_GATEWAY_URL` 或 `SG_URL`
    时，fairing 优先调用 Search Gateway `/fetch`，并保留 blocked/error 诊断；
-   Firecrawl 与本地 HTTP 作为回退路径。
+   本地 HTTP 作为回退路径；托管抓取已禁用。
 4. `enrich()` — 计算 `all-MiniLM-L6-v2` 嵌入；缓存至 `scoring_store.jsonl`。
 5. `score_articles()` — 按个人模型（已部署时）或启发式评分排序。
 6. `write_obsidian()` — 写 Obsidian vault `.md`（除非 `--no-md`）。
@@ -50,19 +50,19 @@ rate-gate 确保同一天内不重复执行 `\r`，除非先完成 `\rate` 或�
 | `--no-notebook` | 本次跳过 NotebookLM 输出 |
 | `--no-mail` | 跳过发送邮件 |
 | `--chinese` | 邮件正文翻译为中文 |
-| `--force` | 即使 `rate_pending` 未完成也强制运行 |
+| `--force` | 已弃用的兼容参数；日报不再受标注门槛阻断 |
 
 持久化默认值：在 `.env` 中设置 `RUN_MD`、`RUN_NOTEBOOK`、`RUN_CHINESE`、`RUN_NO_MAIL`。
 
 ---
 
-### `\rate` — 每日必需打标
+### `\rate` — 可选文章标注
 
 ```
 \rate [--ext]
 ```
 
-不带 `--ext`：展示 `rate_pending.json` 中今日必需样本。处理完所有文章或按 `s` 退出。完成后设置 `completed=true`。
+不带 `--ext`：展示 `rate_pending.json` 中今日可选样本。完成后设置 `completed=true`；未完成不影响日报。
 
 带 `--ext`：扩展模式。要求 `rate_pending.completed == true`。展示 `title_index.jsonl` 中所有未标注文章（最新优先，无时间限制）。
 
@@ -307,11 +307,9 @@ article_id = sha256(normalize_url(url))[:16]
 
 从规范化 URL 派生的 16 位十六进制（64 比特）稳定标识符，在所有数据文件和 payload 队列中通用。
 
-### Rate-Gate（打标门禁）
+### 标注积压
 
-每次 `\r` 后，`rate_pending.json` 以 `completed=false` 写入。同一天内下次 `\r` 检查此文件，未完成则阻断。使用 `\r --force` 可跳过。
-
-目的：确保重新运行日报前至少完成一次打标。
+每次 `\r` 后仍记录 `rate_pending.json`，供手动标注和训练使用。未完成的标注只记日志；下次日报继续拉取资讯。
 
 ### 动态回溯窗口
 
@@ -334,18 +332,14 @@ fairing 在运行延迟时自动延长回溯窗口，补齐遗漏文章。首次
 
 ## 故障排查
 
-### Rate-gate 阻断
+### 标注积压
 
-```
-Warning: \rate incomplete — run \rate before next \r (or use --force)
-```
-
-运行 `\rate` 完成今日打标样本，或使用 `\r --force` 强制跳过。
+标注未完成不会阻断日报。如果日报未生成，检查真实抓取、去重、写出和备份结果。
 
 ### `\rate --ext` 阻断
 
 ```
-Error: mandatory \rate not completed — run \rate first
+Error: daily \rate batch not completed — run \rate first
 ```
 
 `\rate --ext` 要求 `rate_pending.completed == true`，请先运行 `\rate`。

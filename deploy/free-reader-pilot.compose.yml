@@ -1,0 +1,59 @@
+# Isolated public-feed comparison. Images and state paths are supplied by the
+# operator after checking current official releases and local capacity.
+services:
+  miniflux-db:
+    image: ${POSTGRES_IMAGE:?pin a current official PostgreSQL image by digest}
+    restart: "no"
+    environment:
+      POSTGRES_USER: miniflux
+      POSTGRES_DB: miniflux
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - type: bind
+        source: ${MINIFLUX_DB_DIR:?set an isolated local PostgreSQL state directory}
+        target: /var/lib/postgresql
+      - type: bind
+        source: ${MINIFLUX_DB_PASSWORD_FILE:?set a private local password file}
+        target: /run/secrets/db_password
+        read_only: true
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "miniflux"]
+      interval: 10s
+      start_period: 30s
+
+  miniflux:
+    image: ${MINIFLUX_IMAGE:?pin a current official Miniflux image by digest}
+    restart: "no"
+    depends_on:
+      miniflux-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:15010:8080"
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      RUN_MIGRATIONS: "1"
+      CREATE_ADMIN: "1"
+      ADMIN_USERNAME: ruoyi
+      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+    volumes:
+      - type: bind
+        source: ${MINIFLUX_DB_URL_FILE:?set a private local database URL file}
+        target: /run/secrets/database_url
+        read_only: true
+      - type: bind
+        source: ${MINIFLUX_ADMIN_PASSWORD_FILE:?set a private local admin password file}
+        target: /run/secrets/admin_password
+        read_only: true
+
+  freshrss:
+    image: ${FRESHRSS_IMAGE:?pin a current official FreshRSS image by digest}
+    restart: "no"
+    ports:
+      - "127.0.0.1:15011:80"
+    environment:
+      TZ: Asia/Shanghai
+      CRON_MIN: "1,31"
+    volumes:
+      - type: bind
+        source: ${FRESHRSS_DATA_DIR:?set an isolated local SQLite state directory}
+        target: /var/www/FreshRSS/data

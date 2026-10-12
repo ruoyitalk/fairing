@@ -10,12 +10,12 @@
 
 ```
 1. \r                      fetch RSS, score, write files, email, backup, sample pending
-2. \rate                   label today's mandatory sample (3–8 articles)
+2. \rate (optional)        label useful articles for later ranking
 3. \rate --ext (optional)  label more from historical pool
 4. \lb (optional)          search and correct past labels
 ```
 
-The rate-gate ensures `\r` is not run again on the same day without completing `\rate` first, unless `--force` is passed.
+Pending labels are logged but never block the daily digest. `--force` is a deprecated no-op kept for older scripts.
 
 ---
 
@@ -24,7 +24,7 @@ The rate-gate ensures `\r` is not run again on the same day without completing `
 ### `\r` — Run Digest
 
 ```
-\r [--no-md] [--no-notebook] [--no-mail] [--chinese] [--force]
+\r [--no-md] [--no-notebook] [--no-mail] [--chinese]
 ```
 
 Full pipeline run. Sequence:
@@ -33,7 +33,7 @@ Full pipeline run. Sequence:
 2. `filter_unseen()` — two-layer dedup: normalized URL + normalized title.
 3. Optional source-gated full-text enrichment. When `SEARCH_GATEWAY_URL` or
    `SG_URL` is configured, fairing calls Search Gateway `/fetch` first and
-   preserves blocked/error diagnostics; Firecrawl and local HTTP are fallbacks.
+   preserves blocked/error diagnostics; local HTTP is the fallback. Hosted scraping is disabled.
 4. `enrich()` — compute `all-MiniLM-L6-v2` embeddings; cache in `scoring_store.jsonl`.
 5. `score_articles()` — rank by personal model (if deployed) or fallback heuristic.
 6. `write_obsidian()` — write Obsidian vault `.md` (unless `--no-md`).
@@ -50,19 +50,19 @@ Full pipeline run. Sequence:
 | `--no-notebook` | Skip NotebookLM output this run |
 | `--no-mail` | Skip email send |
 | `--chinese` | Translate email body to Chinese |
-| `--force` | Bypass rate-gate even if `rate_pending` is incomplete |
+| `--force` | Deprecated compatibility flag; labels no longer block the digest |
 
 Persistent defaults: set `RUN_MD`, `RUN_NOTEBOOK`, `RUN_CHINESE`, `RUN_NO_MAIL` in `.env`.
 
 ---
 
-### `\rate` — Mandatory Daily Labeling
+### `\rate` — Optional Labeling
 
 ```
 \rate [--ext]
 ```
 
-Without `--ext`: presents today's mandatory sample from `rate_pending.json`. Blocks until all articles are processed or user exits with `s`. Sets `completed=true` when done.
+Without `--ext`: presents today's optional sample from `rate_pending.json`. Sets `completed=true` when the sample is finished; leaving it unfinished does not stop the digest.
 
 With `--ext`: extended mode. Requires `rate_pending.completed == true`. Presents all unlabeled articles from `title_index.jsonl` in random order, no time limit.
 
@@ -307,11 +307,9 @@ article_id = sha256(normalize_url(url))[:16]
 
 16 hex characters (64-bit) derived from the normalized URL. Used as the stable identifier across all data files and the payload queue.
 
-### Rate-Gate
+### Pending labels
 
-After each `\r`, `rate_pending.json` is written with `completed=false`. The next `\r` on the same day checks this file and blocks if it is incomplete. Use `\r --force` to bypass.
-
-Purpose: ensure at least one daily labeling session before re-running the digest.
+Each `\r` still records `rate_pending.json` for optional labeling and training. Incomplete labels are logged; the next digest continues fetching news.
 
 ### Dynamic Lookback
 
@@ -334,18 +332,14 @@ When `MAIL_SPLIT_N` is set in `.env`, the digest email is split into N parts (on
 
 ## Troubleshooting
 
-### Rate-gate blocked
+### Pending labels
 
-```
-Warning: \rate incomplete — run \rate before next \r (or use --force)
-```
-
-Run `\rate` to complete today's labeling sample. Or `\r --force` to bypass.
+Incomplete labels do not block delivery. If a digest is missing, inspect the fetch, deduplication, output and backup outcomes.
 
 ### `\rate --ext` blocked
 
 ```
-Error: mandatory \rate not completed — run \rate first
+Error: daily \rate batch not completed — run \rate first
 ```
 
 `\rate --ext` requires `rate_pending.completed == true`. Run `\rate` first.

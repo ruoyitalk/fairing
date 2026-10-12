@@ -170,11 +170,21 @@ def test_run_digest_releases_lock_and_propagates_outcome():
     release.assert_called_once_with(lock)
 
 
-def test_locked_run_reports_incomplete_rate_gate():
+def test_locked_run_continues_past_incomplete_optional_labels():
     import main
 
-    with patch.object(main, "_check_rate_gate", return_value=False):
-        assert main._run_digest_locked() is False
+    article = {"url": "https://example.com/new", "title": "New release"}
+    with patch.object(main, "_load_pending", return_value={"n": 8, "completed": False}), \
+         patch.object(main, "_today_label_count", return_value=0), \
+         patch("fairing.config.Config", return_value=SimpleNamespace(rss_sources=[])), \
+         patch("fairing.rss.prune_feed_errors"), \
+         patch("fairing.rss.fetch_rss", return_value=[article]) as fetch, \
+         patch("fairing.state.filter_unseen", return_value=[]), \
+         patch.object(main, "_finalize_successful_run") as finalized:
+        assert main._run_digest_locked() is True
+
+    fetch.assert_called_once()
+    finalized.assert_called_once()
 
 
 def test_cli_run_exits_tempfail_when_pipeline_does_not_complete(monkeypatch):

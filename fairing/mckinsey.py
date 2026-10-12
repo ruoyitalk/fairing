@@ -1,7 +1,4 @@
-"""Scrape McKinsey insight pages via Firecrawl API.
-
-Requires FIRECRAWL_API_KEY in .env (free tier: 500 credits/month at firecrawl.dev).
-Without it, McKinsey pages are skipped — they block headless browsers at the network level.
+"""Legacy McKinsey parsing helpers; hosted scraping is disabled.
 
 Extraction strategy:
   McKinsey pages render article cards as h5 headings in Firecrawl markdown:
@@ -95,34 +92,6 @@ def _extract_articles(markdown: str, source_name: str) -> list[dict]:
 
 
 def fetch_mckinsey(sources: list[McKinseySource], api_key: str) -> list[dict]:
-    """Scrape McKinsey pages using Firecrawl.
-
-    @param sources: list of McKinseySource from config
-    @param api_key: Firecrawl API key
-    @return: list of article dicts (capped at _MAX_PER_PAGE per source)
-    """
-    if not api_key:
-        logger.warning(
-            "FIRECRAWL_API_KEY not set — McKinsey pages skipped. "
-            "Get a free key at https://firecrawl.dev and add it to .env"
-        )
-        return []
-
-    from firecrawl import Firecrawl
-    app = Firecrawl(api_key=api_key)
-
-    articles: list[dict] = []
-    for source in sources:
-        try:
-            doc = app.scrape(source.url, formats=["markdown"])
-            markdown = doc.markdown or ""
-            found = _extract_articles(markdown, source.name)
-            logger.info("[%s] %d articles extracted (cap %d)", source.name, len(found), _MAX_PER_PAGE)
-            articles.extend(found)
-        except Exception as exc:
-            logger.warning("!" * 50)
-            logger.warning("FIRECRAWL FAILED — McKinsey [%s] skipped", source.name)
-            logger.warning("Reason: %s", exc)
-            logger.warning("!" * 50)
-
-    return articles
+    """Keep the old call signature but never invoke a hosted scraping API."""
+    logger.info("McKinsey scraping skipped in the free-only route")
+    return []

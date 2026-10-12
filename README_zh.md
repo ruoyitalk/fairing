@@ -17,6 +17,7 @@ fairing 是个人 RSS 日报工具，内置主动学习相关性分类器。每�
 | [docs/BACKUP.md](docs/BACKUP.md) | 备份与恢复参考手册 |
 | [docs/PAYLOAD.md](docs/PAYLOAD.md) | Payload 队列集成：`\ps`、`\sd`、`\pd` |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | 完整运维手册：所有命令与故障排查 |
+| [docs/FREE_READER_PILOT.md](docs/FREE_READER_PILOT.md) | Miniflux/FreshRSS 本地免费试点与公开 AI 源对照 |
 
 ---
 
@@ -35,21 +36,13 @@ pip install -r requirements.txt
 ### 2. 配置 `.env`
 
 ```bash
-# 必填
-SMTP_USER=your_address@163.com
-SMTP_PASSWORD=your_163_auth_code
-MAIL_TO=recipient@example.com
-GEMINI_API_KEY=AIzaSy...
-
-# 输出目录（每日摘要 + NotebookLM 文件）
-NEWS_DIR=~/files/coding/ruoyi_talk/news
-
-# 多端同步
-# DATA_DIR=~/OneDrive/fairing
+# 本地输出目录；免费试点无需 SMTP 或模型 API key
+NEWS_DIR=~/Documents/fairing-news
+DATA_DIR=~/Documents/fairing-data
 
 # run 行为默认值
 # RUN_CHINESE=false
-# RUN_NO_MAIL=false
+# RUN_NO_MAIL=true
 # RUN_MD=true
 # RUN_NOTEBOOK=true
 # MAIL_SPLIT_N=2
@@ -68,12 +61,18 @@ cp config/sources.local.yaml.example config/sources.local.yaml
 python main.py
 ```
 
-进入 Shell 后：`\r` 运行首次日报，`\rate` 完成今日打标任务。
+进入 Shell 后：`\r` 运行首次日报。`\rate` 是可选的文章标注，不再阻断下一次日报。
+
+免费本地阅读器试点可导出 15 个公开 AI 订阅源，导入自托管 Miniflux 或 FreshRSS；该导出不读取 `sources.local.yaml` 中的私有源：
+
+```bash
+python -m fairing.opml --output /tmp/fairing-ai-pilot.opml
+```
 
 非交互式 / cron 用法：
 
 ```bash
-python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
+python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook]
 ```
 
 ---
@@ -82,8 +81,8 @@ python main.py run [--chinese] [--no-mail] [--no-md] [--no-notebook] [--force]
 
 | 快捷键 | 命令 | 参数 | 说明 |
 |--------|------|------|------|
-| `\r` | `run` | `[--no-mail] [--chinese] [--force]` | 完整流水线：RSS → 嵌入 → 评分 → 写摘要 → 发邮件 → 备份 |
-| `\rate` | `rate` | `[--ext]` | 每日必需打标批次；`--ext` 扩展至所有未标文章 |
+| `\r` | `run` | `[--no-mail] [--chinese]` | 完整流水线：RSS → 嵌入 → 评分 → 写摘要 → 发邮件 → 备份 |
+| `\rate` | `rate` | `[--ext]` | 可选文章标注；`--ext` 扩展至所有未标文章 |
 | `\lb` | `label_browser` | `[关键词]` | 按关键词搜索并修改历史标注 |
 | `\ms` | `model_status` | | 分类器状态、训练历史、信号词 |
 | `\slr` | `suspect` | | 审查可疑标注（模型与判断分歧 >60%） |
@@ -144,17 +143,17 @@ DATA_DIR=~/OneDrive/fairing
 
 | 变量 | 是否必填 | 默认值 | 说明 |
 |------|----------|--------|------|
-| `SMTP_USER` | 是 | — | 163 发件地址 |
-| `SMTP_PASSWORD` | 是 | — | 163 授权码 |
-| `MAIL_TO` | 是 | — | 收件地址 |
-| `GEMINI_API_KEY` | 是* | — | Gemini 翻译 Key（仅发英文邮件时可不填） |
+| `SMTP_USER` | 仅邮件模式 | — | 163 发件地址 |
+| `SMTP_PASSWORD` | 仅邮件模式 | — | 163 授权码 |
+| `MAIL_TO` | 仅邮件模式 | — | 收件地址 |
+| `OLLAMA_MODEL` | 否 | — | 已安装的本地模型，用于可选中文翻译；未配置时保留英文 |
+| `OLLAMA_BASE_URL` | 否 | `http://127.0.0.1:11434` | 本地 Ollama 地址 |
 | `DATA_DIR` | 否 | 项目根目录 | 所有运行时数据文件 |
 | `BACKUP_DIR` | 否 | `~/Documents/fairing/data_bak` | 备份目标目录 |
 | `NEWS_DIR` | 否 | `~/Documents/fairing-news` | 输出根目录；日摘 → `NEWS_DIR/YYYY-WXX/`；NotebookLM → `NEWS_DIR/notebooklm/` |
 | `SEARCH_GATEWAY_URL` / `SG_URL` | 否 | — | 已配置源的全文抓取优先网关 |
 | `SEARCH_GATEWAY_API_KEY` | 否 | — | Search Gateway 需要认证时使用 |
-| `FIRECRAWL_API_KEY` | 否 | — | 全文补充抓取的回退服务 |
-| `TRANSLATOR` | 否 | `gemini` | 翻译后端：`gemini` / `openai` / `claude` |
+| `TRANSLATOR` | 否 | `ollama` | 全免费路线仅使用本地 Ollama |
 | `MAIL_SPLIT_N` | 否 | （关闭） | 将摘要邮件拆分为 N 封 |
 | `TOP_N` | 否 | `20` | 邮件中全文展示的文章数 |
 | `RUN_MD` | 否 | `true` | 永久禁用 Obsidian 输出：设为 `false` |
@@ -170,7 +169,7 @@ DATA_DIR=~/OneDrive/fairing
 | `url` | — | RSS/Atom 订阅地址 |
 | `category` | `General` | Obsidian 笔记和邮件的分组依据 |
 | `tags` | `[]` | subscriber fan-out 使用的语义标签 |
-| `firecrawl_fulltext` | `false` | 是否在嵌入前补充全文；配置 Search Gateway 时优先走 `/fetch`，Firecrawl/本地 HTTP 作为回退 |
+| `firecrawl_fulltext` | `false` | 历史字段名：嵌入前经 Search Gateway 补全文，失败后使用本地 HTTP；托管抓取已禁用 |
 
 回溯窗口现为动态计算（详见 [OPERATIONS.md](docs/OPERATIONS.md)——动态回溯窗口），不再使用每源 `lookback_hours` 字段。
 

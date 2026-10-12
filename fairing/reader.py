@@ -60,8 +60,7 @@ def fetch_full(url: str) -> str | None:
     embeddings are computed on meaningful content. Not intended for
     user-facing reading — that is the payload consumer's responsibility.
 
-    Tries Firecrawl first if FIRECRAWL_API_KEY is set, then falls back to
-    requests + BeautifulSoup for plain-text extraction.
+    Uses Search Gateway when configured, otherwise local HTTP extraction.
 
     @return: text string, or None on failure
     """
@@ -73,30 +72,12 @@ def fetch_full_result(url: str, *, max_length: int = 20000) -> dict:
     """Fetch full article text with diagnostics.
 
     Search Gateway is preferred when configured because it centralizes fetch
-    fallbacks and WAF classification for the homeserver stack. Firecrawl and a
-    minimal HTTP parser remain local fallbacks for non-homeserver use.
+    fallbacks and WAF classification for the homeserver stack. A minimal HTTP
+    parser is the local fallback; paid extraction providers are never called.
     """
     sg_result = _fetch_via_search_gateway(url, max_length=max_length)
     if sg_result is not None:
         return sg_result
-
-    firecrawl_key = os.environ.get("FIRECRAWL_API_KEY", "")
-    if firecrawl_key:
-        try:
-            from firecrawl import Firecrawl
-            doc  = Firecrawl(api_key=firecrawl_key).scrape(url, formats=["markdown"])
-            text = (doc.markdown or "").strip()
-            if text:
-                return {
-                    "content": text[:max_length],
-                    "engine": "firecrawl",
-                    "blocked": False,
-                    "error_type": None,
-                    "block_reason": None,
-                    "upstream_status": None,
-                }
-        except Exception as e:
-            logger.warning("Firecrawl failed: %s — falling back to requests", e)
 
     try:
         r  = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
