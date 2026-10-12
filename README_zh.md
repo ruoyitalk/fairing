@@ -161,6 +161,8 @@ DATA_DIR=~/OneDrive/fairing
 | `RUN_CHINESE` | 否 | `false` | 另写中文日摘；发邮件时也使用中文 |
 | `RUN_NO_MAIL` | 否 | `false` | 永不发邮件：设为 `true` |
 
+日摘最多选 20 篇，优先 AI 来源，并避免被单一订阅源占满；其余文章仍留在本地标题索引，可在网页搜索。定时任务运行镜像中的 `/app/main.py`，读取挂载的私有源配置。如果英文稿已写入而中文稿因中断缺失，可执行 `python -m fairing.recover_chinese_note` 从当天本地英文稿恢复；这个命令不发邮件，也不改去重记录。
+
 ### sources.yaml 字段说明
 
 | 字段 | 默认值 | 说明 |

@@ -30,6 +30,6 @@ fi
 {
 printf '%s Fairing daily run started\n' "$(date -Is)"
 docker exec "$containers" python -m fairing.runtime_probe
-docker exec "$containers" python /fairing/main.py run --no-mail
+docker exec "$containers" python /app/main.py run --no-mail
 printf '%s Fairing daily run completed\n' "$(date -Is)"
 } 2>&1 | tee -a "$LOG_FILE"

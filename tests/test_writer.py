@@ -79,6 +79,32 @@ def test_write_digest_tiered_display(tmp_path):
     assert "Remaining" in path.read_text(encoding="utf-8")
 
 
+def test_daily_selection_limits_backlog_and_spreads_sources():
+    from fairing.writer import select_digest_articles
+    articles = [
+        _article(url=f"https://a.com/{i}", source="A", published=f"2026-10-{30-i:02d}")
+        for i in range(12)
+    ] + [
+        _article(url=f"https://b.com/{i}", source="B", published=f"2026-09-{30-i:02d}")
+        for i in range(12)
+    ]
+    selected = select_digest_articles(articles, limit=8, per_source=3)
+    assert len(selected) == 8
+    assert {a["source"] for a in selected} == {"A", "B"}
+    assert sum(a["source"] == "B" for a in selected) >= 3
+    assert selected[0]["url"] == "https://a.com/0"
+
+
+def test_daily_selection_prioritizes_ai_sources_without_dropping_other_index_entries():
+    from fairing.writer import select_digest_articles
+    database = _article(url="https://db.example/1", category="Database", published="2026-10-12")
+    ai = _article(url="https://ai.example/1", category="AI / Research", published="2026-10-11")
+    articles = [database, ai]
+    selected = select_digest_articles(articles, limit=1)
+    assert selected == [ai]
+    assert articles == [database, ai]
+
+
 def test_write_chinese_note_uses_plain_chinese_headings(tmp_path):
     from fairing.writer import write_chinese
     article = _article(title="Original title")

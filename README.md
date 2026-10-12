@@ -166,6 +166,8 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 
 翻译只处理 `config/sources.yaml` 中的公开来源；`sources.local.yaml` 的本地来源及无法确认来源归属的旧缓存保留英文，不会以 `public` 身份送入 Gateway。Gateway 密钥只写入运行时私有配置。
 
+The daily note selects up to 20 articles, prioritizing AI sources and spreading picks across feeds. All fetched articles remain searchable in the local title index. Scheduled runs use the image's `/app/main.py`, which reads the mounted private source configuration. If a run was interrupted after writing the English note but before the Chinese note, `python -m fairing.recover_chinese_note` rebuilds today's Chinese note from the local English file without email or dedup changes.
+
 ### sources.yaml fields
 
 | Field | Default | Description |

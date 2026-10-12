@@ -59,7 +59,7 @@ for contract in \
   fi
 done
 
-if ! grep -Fq 'docker exec fairing python /fairing/deploy/fairing-runtime-smoke.py' \
+if ! grep -Fq 'docker exec fairing python /app/deploy/fairing-runtime-smoke.py' \
   "$DEPLOY_SCRIPT"; then
   printf 'Fairing deploy must run the production data and model smoke probe\n' >&2
   exit 1
@@ -81,9 +81,9 @@ if grep -Fqi -- 'n8n' "$SCRIPT_DIR/../deploy/sync-fairing-cron"; then
   exit 1
 fi
 
-if ! grep -Fqx 'docker exec "$containers" python /fairing/main.py run --no-mail' \
+if ! grep -Fqx 'docker exec "$containers" python /app/main.py run --no-mail' \
   "$SCRIPT_DIR/../deploy/fairing-daily-run"; then
-  printf 'Fairing daily run must respect the label gate and suppress legacy mail\n' >&2
+  printf 'Fairing daily run must use the image config and suppress mail\n' >&2
   exit 1
 fi
 if ! grep -Fqx 'docker exec "$containers" python -m fairing.runtime_probe' \
@@ -92,7 +92,7 @@ if ! grep -Fqx 'docker exec "$containers" python -m fairing.runtime_probe' \
   exit 1
 fi
 if grep -Fq -- '--force' "$SCRIPT_DIR/../deploy/fairing-daily-run"; then
-  printf 'Fairing daily run must not bypass the label gate\n' >&2
+  printf 'Fairing daily run must not use the retired force option\n' >&2
   exit 1
 fi
 grep -Fq 'tee -a "$LOG_FILE"' "$SCRIPT_DIR/../deploy/fairing-daily-run"
@@ -137,7 +137,7 @@ case "${1:-}" in
     ;;
   exec)
     printf 'mock docker exec: %s\n' "${*:3}"
-    if [[ "$*" == *'/fairing/main.py run --no-mail'* ]] &&
+    if [[ "$*" == *'/app/main.py run --no-mail'* ]] &&
        [[ "${FAKE_FAIRING_RUN_EXIT:-0}" -ne 0 ]]; then
       exit "$FAKE_FAIRING_RUN_EXIT"
     fi
@@ -155,7 +155,7 @@ FAIRING_RUN_LOG_MAX_BYTES=5 \
   bash "$SCRIPT_DIR/../deploy/fairing-daily-run" >/dev/null
 grep -Fqx 'old-log-data' "$test_dir/fairing.log.1"
 grep -Fq 'python -m fairing.runtime_probe' "$test_dir/fairing.log"
-grep -Fq 'python /fairing/main.py run --no-mail' "$test_dir/fairing.log"
+grep -Fq 'python /app/main.py run --no-mail' "$test_dir/fairing.log"
 grep -Fq 'Fairing daily run completed' "$test_dir/fairing.log"
 
 set +e

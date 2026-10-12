@@ -73,6 +73,37 @@ def top_n(total: int) -> int:
 TOP_N = _TOP_MAX
 
 
+def select_digest_articles(articles: list[dict], limit: int = 20,
+                           per_source: int = 5) -> list[dict]:
+    """Prefer AI sources and keep the note short; the index retains all items."""
+    if any("score" in article for article in articles):
+        ranked = articles
+    else:
+        ranked = sorted(articles, key=lambda item: str(item.get("published") or ""),
+                        reverse=True)
+
+    def is_ai(article: dict) -> bool:
+        tags = article.get("tags") or []
+        return "ai" in tags or "ai" in str(article.get("category") or "").casefold()
+
+    ranked = [article for article in ranked if is_ai(article)] + [
+        article for article in ranked if not is_ai(article)
+    ]
+    selected: list[dict] = []
+    deferred: list[dict] = []
+    source_counts: dict[str, int] = {}
+    for article in ranked:
+        source = str(article.get("source") or "")
+        if source_counts.get(source, 0) < per_source and len(selected) < limit:
+            selected.append(article)
+            source_counts[source] = source_counts.get(source, 0) + 1
+        else:
+            deferred.append(article)
+    if len(selected) < limit:
+        selected.extend(deferred[:limit - len(selected)])
+    return selected
+
+
 def _build_digest_lines(articles: list[dict], today_str: str,
                          use_zh: bool = False) -> list[str]:
     """Build plain Markdown digest lines with tiered display when articles are scored.
@@ -172,7 +203,8 @@ def write_digest(articles: list[dict], output_dir: str) -> tuple[pathlib.Path, i
 
     @return: (path, new_article_count)
     """
-    today = date.today()
+    from .state import today_beijing
+    today = date.fromisoformat(today_beijing())
     today_str = today.isoformat()
     out_dir = pathlib.Path(output_dir) / _week_dir(today)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -186,7 +218,8 @@ def write_chinese(articles: list[dict], output_dir: str) -> tuple[pathlib.Path, 
 
     @return: (path, new_article_count)
     """
-    today = date.today()
+    from .state import today_beijing
+    today = date.fromisoformat(today_beijing())
     today_str = today.isoformat()
     out_dir = pathlib.Path(output_dir) / _week_dir(today)
     out_dir.mkdir(parents=True, exist_ok=True)

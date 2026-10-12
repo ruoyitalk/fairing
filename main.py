@@ -1482,7 +1482,7 @@ def _run_digest_locked(chinese: bool = False,
     from fairing.rss import fetch_rss, prune_feed_errors
     from fairing.embedder import enrich, load_store, fan_out
     from fairing.scorer import score_articles
-    from fairing.writer import write_digest, write_chinese
+    from fairing.writer import write_digest, write_chinese, select_digest_articles
     from fairing.mailer import send_digest
     from fairing.state import filter_unseen, mark_seen
 
@@ -1509,10 +1509,10 @@ def _run_digest_locked(chinese: bool = False,
     articles = enrich(articles)
     articles = score_articles(articles)
 
-    path, count = write_digest(articles, cfg.news_dir)
+    digest_articles = select_digest_articles(articles)
+    logger.info("Daily note selected %d/%d articles", len(digest_articles), len(articles))
+    path, count = write_digest(digest_articles, cfg.news_dir)
     logger.info("Digest (EN) -> %s  [+%d]", path, count)
-
-    mark_seen(articles)
 
     # Fan-out: write articles to per-subscriber output files based on tag matching
     if cfg.subscriptions:
@@ -1524,7 +1524,7 @@ def _run_digest_locked(chinese: bool = False,
 
     # Keep the English data and digest canonical. A Chinese note is generated
     # separately, including when the scheduled run does not send email.
-    email_articles = articles
+    email_articles = digest_articles
     if chinese:
         from fairing.translator import translate, translation_available
         if not translation_available():
@@ -1532,13 +1532,17 @@ def _run_digest_locked(chinese: bool = False,
         else:
             import copy
             logger.info("=== Translating public sources for the Chinese note ===")
-            email_articles = translate(copy.deepcopy(articles))
+            email_articles = translate(copy.deepcopy(digest_articles))
             zh_path, zh_count = write_chinese(email_articles, cfg.news_dir)
             logger.info("Digest (ZH) -> %s  [+%d]", zh_path, zh_count)
     if no_mail:
         logger.info("Email skipped (--no-mail)")
     else:
         send_digest(email_articles)
+
+    # Only advance dedup state after both requested notes have been written.
+    # A stopped translation must remain retryable on the next run.
+    mark_seen(articles)
 
     # Base n on today's cumulative article count (seen_urls already updated by mark_seen).
     today_data  = json.loads(SEEN_URLS().read_text(encoding="utf-8")) if SEEN_URLS().exists() else {}

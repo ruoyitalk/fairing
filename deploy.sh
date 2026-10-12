@@ -101,7 +101,6 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       -e HF_HUB_OFFLINE=1 \\
       -e CUDA_VISIBLE_DEVICES= \\
       -e DATA_DIR=/data/fairing \\
-      -e FAIRING_ROOT=/fairing \\
       -e PAYLOAD_ROOT=/payload \\
       -e NEWS_DIR=/data/news \\
       -e KNOWLEDGE_DIR=/data/ruoyi_download \\
@@ -112,7 +111,6 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       -v /data/data_bak:/data/data_bak \\
       -v /data/data_bak/payload:/data/payload \\
       -v /opt/docker/homeserver-context/secrets:/run/homeserver-secrets:ro \\
-      -v '$REMOTE_DIR':/fairing:ro \\
       -v /opt/docker/payload_git:/payload:ro \\
       -v /opt/docker/fairing/config:/app/config:ro \\
       -v /opt/docker/hf_cache:/cache/huggingface:ro \\
@@ -139,7 +137,7 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
     if [[ \"\$state\" == unhealthy ]]; then break; fi
     sleep 2
   done
-  if [[ \"\$healthy\" == 1 ]] && ! docker exec fairing python /fairing/deploy/fairing-runtime-smoke.py; then
+  if [[ \"\$healthy\" == 1 ]] && ! docker exec fairing python /app/deploy/fairing-runtime-smoke.py; then
     healthy=0
   fi
   if [[ \"\$healthy\" != 1 ]]; then

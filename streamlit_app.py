@@ -40,6 +40,7 @@ from fairing.web_auth import (
     user_email,
 )
 from fairing.web_articles import is_web_url, latest_articles
+from fairing.web_digest import latest_digest, plain_markdown
 
 _TZ_BJT = timezone(timedelta(hours=8))
 
@@ -119,6 +120,11 @@ def _read_feedback() -> list[dict]:
     return load_feedback()
 
 
+@st.cache_data(ttl=30)
+def _read_latest_digest():
+    return latest_digest(Path(os.environ.get("NEWS_DIR", "/data/news")))
+
+
 def _load_json(path: Path, default=None):
     try:
         if path.exists():
@@ -185,9 +191,9 @@ with st.sidebar:
     labeled_sb = _labeled_urls(feedback_sb)
     queue_sb = load_payload_queue()
 
-    st.metric("已标记文章", len(labeled_sb))
-    st.metric("标题索引", len(title_idx_sb))
-    st.metric("载荷队列", len(queue_sb) if isinstance(queue_sb, list) else 0)
+    st.metric("已标记", len(labeled_sb))
+    st.metric("收录记录", len(title_idx_sb))
+    st.metric("待保存", len(queue_sb) if isinstance(queue_sb, list) else 0)
 
     lrf = last_run_time_file()
     last_run = lrf.read_text(encoding="utf-8").strip() if lrf.exists() else ""
@@ -207,13 +213,36 @@ with st.sidebar:
     st.divider()
     page = st.radio(
         "导航",
-        ["最新资讯", "运行状态", "文章标记", "载荷队列", "运行控制"],
+        ["最新资讯", "运行状态", "标记文章", "待保存", "运行控制"],
         label_visibility="collapsed",
     )
 
 if page == "最新资讯":
     st.header("最新资讯")
-    st.caption("按收录时间排列，打开原文后再决定是否标记。")
+    st.caption("先看日摘，再按来源和标题找原文。")
+    digest = _read_latest_digest()
+    if digest:
+        digest_path, digest_day, digest_chinese, digest_articles = digest
+        st.subheader("最近一期日摘")
+        st.caption(f"{digest_day} · {'中文' if digest_chinese else '英文'} · 共 {len(digest_articles)} 篇带摘要的文章")
+        for article in digest_articles[:20]:
+            with st.container(border=True):
+                st.markdown(f"### {plain_markdown(article['title'])}")
+                st.caption(plain_markdown(f"{article['source'] or '未知来源'} · {article['published'] or '日期未知'}"))
+                if article["summary"]:
+                    st.markdown(plain_markdown(article["summary"][:320]))
+                st.link_button("阅读原文", article["url"])
+        if len(digest_articles) > 20:
+            st.caption("这里只显示前 20 篇。完整日摘可下载查看。")
+        st.download_button(
+            "下载完整日摘", digest_path.read_bytes(), file_name=digest_path.name,
+            mime="text/markdown",
+        )
+    else:
+        st.info("还没有日摘。定时任务运行后会显示在这里。")
+
+    st.divider()
+    st.subheader("按标题查找")
     all_articles = _read_title_index()
     sources = sorted({str(item.get("source")) for item in all_articles if item.get("source")})
     search_col, source_col = st.columns([2, 1])
@@ -226,15 +255,15 @@ if page == "最新资讯":
         source="" if selected_source == "全部来源" else selected_source,
     )
     if not all_articles:
-        st.info("还没有收录文章。运行一次摘要后再来查看。")
+        st.info("还没有收录文章。定时任务运行后再来查看。")
     elif not articles:
         st.info("没有找到符合条件的文章。")
     else:
         st.caption(f"显示最近 {len(articles)} 篇")
         for article in articles:
             with st.container(border=True):
-                st.subheader(article.get("title") or "无标题")
-                st.caption(f"{article.get('source') or '未知来源'} · {article.get('date') or '日期未知'}")
+                st.markdown(f"### {plain_markdown(article.get('title') or '无标题')}")
+                st.caption(plain_markdown(f"{article.get('source') or '未知来源'} · {article.get('date') or '日期未知'}"))
                 st.link_button("阅读原文", article["url"])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -246,37 +275,33 @@ elif page == "运行状态":
     feedback = _read_feedback()
     labeled = _labeled_urls(feedback)
     title_idx = _read_title_index()
-    pending = _load_json(rate_pending_file(), {})
-
     today_str = datetime.now(_TZ_BJT).date().isoformat()
     today_labels = sum(1 for r in feedback if r.get("date", "") == today_str)
     has_model = model_file().exists()
     unlabeled_count = sum(1 for a in title_idx if a.get("url") not in labeled)
 
     # ── metrics ───────────────────────────────────────────────────────────────
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("今日标记", today_labels)
     with col2:
-        rate_n = pending.get("n", 0)
-        rate_done = pending.get("completed", False)
-        st.metric("今日标记目标", rate_n, delta="已完成" if rate_done else "未完成")
-    with col3:
         st.metric("待标记", unlabeled_count)
-    with col4:
+    with col3:
         if has_model:
-            st.metric("模型", "已训练")
+            st.metric("个性化筛选", "已启用")
         elif len(labeled) >= 80:
-            st.metric("模型", "等待下次运行")
+            st.metric("个性化筛选", "等待更新")
         else:
-            st.metric("模型", "样本不足")
+            st.metric("个性化筛选", "尚未启用")
+
+    st.caption("标记文章是可选的，不影响每日资讯更新。")
 
     st.divider()
 
     # ── model detail ──────────────────────────────────────────────────────────
     col_a, col_b = st.columns(2)
     with col_a:
-        st.subheader("筛选模型")
+        st.subheader("个性化筛选")
         if has_model:
             mtime = datetime.fromtimestamp(model_file().stat().st_mtime)
             st.info(f"最后训练：{mtime.strftime('%Y-%m-%d %H:%M')}")
@@ -288,9 +313,9 @@ elif page == "运行状态":
         else:
             prog = min(len(labeled) / 80, 1.0)
             if len(labeled) < 80:
-                st.warning(f"尚未训练完成，还需 **{80 - len(labeled)}** 条标记（当前 {len(labeled)} / 80）")
+                st.info(f"目前有 {len(labeled)} 条标记；达到 80 条后可以按个人偏好排序。")
             else:
-                st.info(f"已有 {len(labeled)} 条标记，模型将在下次运行时自动训练")
+                st.info(f"已有 {len(labeled)} 条标记，下次运行后会更新筛选结果。")
             st.progress(prog)
 
     with col_b:
@@ -325,8 +350,9 @@ elif page == "运行状态":
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: LABEL ARTICLES  (auto-loads on visit, no mode selection)
 # ══════════════════════════════════════════════════════════════════════════════
-elif page == "文章标记":
-    st.header("文章标记")
+elif page == "标记文章":
+    st.header("标记文章")
+    st.caption("可选操作；日摘会照常更新。")
 
     # Init session state
     if "label_idx" not in st.session_state:
@@ -417,23 +443,23 @@ elif page == "文章标记":
                 st.session_state.label_idx += 1
                 st.rerun()
         with col4:
-            if st.button("加入队列"):
+            if st.button("加入待保存"):
                 _do_label(1, enqueue=True)
                 st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: PAYLOAD QUEUE
 # ══════════════════════════════════════════════════════════════════════════════
-elif page == "载荷队列":
-    st.header("载荷队列")
+elif page == "待保存":
+    st.header("待保存")
 
     queue = load_payload_queue()
 
     col_m, col_c = st.columns([3, 1])
     with col_m:
-        st.metric("队列文章数", len(queue))
+        st.metric("文章数", len(queue))
     with col_c:
-        if queue and st.button("清空队列", type="secondary"):
+        if queue and st.button("清空列表", type="secondary"):
             write_payload_queue([])
             st.rerun()
 
@@ -444,7 +470,7 @@ elif page == "载荷队列":
                 col_t, col_del = st.columns([5, 1])
                 with col_t:
                     st.markdown(f"**{item.get('title', '无标题')}**")
-                    st.caption(f"{item.get('source','—')} · `{item.get('article_id','')}`")
+                    st.caption(item.get("source", "—"))
                     url = item.get("url", "")
                     if is_web_url(url):
                         st.link_button("阅读原文", url)
@@ -453,10 +479,10 @@ elif page == "载荷队列":
                         remove_from_payload_queue(item.get("article_id", ""))
                         st.rerun()
     else:
-        st.info("队列为空。在文章标记页面点击「入队」添加文章。")
+        st.info("列表为空。可以从「标记文章」加入，也可以在下方搜索。")
 
     st.divider()
-    st.subheader("搜索文章并入队")
+    st.subheader("搜索文章并加入")
     search_q = st.text_input("关键词搜索标题")
     if search_q:
         kws = search_q.lower().split()
