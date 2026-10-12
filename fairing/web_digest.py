@@ -20,6 +20,7 @@ def parse_digest(text: str) -> list[dict[str, str]]:
     """Extract writer-generated article blocks without rendering feed Markdown."""
     articles: list[dict[str, str]] = []
     current: dict[str, str] | None = None
+    category = ""
 
     def finish() -> None:
         if current and current["title"] and is_web_url(current["url"]):
@@ -29,13 +30,20 @@ def parse_digest(text: str) -> list[dict[str, str]]:
         line = raw_line.strip()
         if line.startswith("### "):
             finish()
-            current = {"title": line[4:][:180], "source": "", "published": "", "url": "", "summary": ""}
+            current = {"title": line[4:][:180], "source": "", "category": category,
+                       "published": "", "url": "", "summary": ""}
             continue
-        if current is None:
-            continue
-        if line.startswith("## ") or line == "---":
+        if line.startswith("## "):
             finish()
             current = None
+            category = line.split(" · ", 1)[1][:100] if " · " in line else ""
+            continue
+        if line == "---":
+            finish()
+            current = None
+            category = ""
+            continue
+        if current is None:
             continue
         if line.startswith("| Source |"):
             current["source"] = line.removeprefix("| Source |").removesuffix("|").strip()[:100]

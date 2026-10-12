@@ -25,7 +25,7 @@ class WebDigestTests(unittest.TestCase):
 不可展示。
 """
         self.assertEqual(parse_digest(note), [{
-            "title": "新发布", "source": "OpenAI", "published": "2026-10-12",
+            "title": "新发布", "source": "OpenAI", "category": "AI", "published": "2026-10-12",
             "url": "https://example.org/a", "summary": "公开摘要。",
         }])
 

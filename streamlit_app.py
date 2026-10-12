@@ -41,6 +41,7 @@ from fairing.web_auth import (
 )
 from fairing.web_articles import is_web_url, latest_articles
 from fairing.web_digest import latest_digest, plain_markdown
+from fairing.writer import select_digest_articles
 
 _TZ_BJT = timezone(timedelta(hours=8))
 
@@ -223,17 +224,18 @@ if page == "最新资讯":
     digest = _read_latest_digest()
     if digest:
         digest_path, digest_day, digest_chinese, digest_articles = digest
+        featured = select_digest_articles(digest_articles)
         st.subheader("最近一期日摘")
-        st.caption(f"{digest_day} · {'中文' if digest_chinese else '英文'} · 共 {len(digest_articles)} 篇带摘要的文章")
-        for article in digest_articles[:20]:
+        st.caption(f"{digest_day} · {'中文' if digest_chinese else '英文'} · 从 {len(digest_articles)} 篇中显示 {len(featured)} 篇，优先 AI 来源")
+        for article in featured:
             with st.container(border=True):
                 st.markdown(f"### {plain_markdown(article['title'])}")
                 st.caption(plain_markdown(f"{article['source'] or '未知来源'} · {article['published'] or '日期未知'}"))
                 if article["summary"]:
                     st.markdown(plain_markdown(article["summary"][:320]))
                 st.link_button("阅读原文", article["url"])
-        if len(digest_articles) > 20:
-            st.caption("这里只显示前 20 篇。完整日摘可下载查看。")
+        if len(digest_articles) > len(featured):
+            st.caption("完整日摘可下载查看。")
         st.download_button(
             "下载完整日摘", digest_path.read_bytes(), file_name=digest_path.name,
             mime="text/markdown",
