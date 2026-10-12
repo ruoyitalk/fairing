@@ -1,42 +1,42 @@
 #!/usr/bin/env bash
-# Build and replace Fairing from the Git checkout. Runtime data and secrets stay
-# on the homeserver; the image and its OCI revision are reproducible from Git.
+# Build and replace Fairing from a clean Git commit. Runtime data and secrets
+# stay on the homeserver; the release directory is immutable.
 
 set -euo pipefail
 
 DEPLOY_HOST="${FAIRING_DEPLOY_HOST:-homeserver-cf}"
 SSH_KEY="${FAIRING_DEPLOY_SSH_KEY:-}"
-REMOTE_DIR="${FAIRING_REMOTE_DIR:-/opt/docker/fairing_git}"
+REMOTE_ROOT="${FAIRING_REMOTE_ROOT:-/opt/docker/fairing-releases}"
 REMOTE_ENV_FILE="${FAIRING_REMOTE_ENV_FILE:-/opt/docker/fairing/.env}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FULL_REVISION="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
 SOURCE_REVISION="$(git -C "$SCRIPT_DIR" rev-parse --short=12 HEAD)"
 if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain)" ]]; then
-  SOURCE_REVISION="${SOURCE_REVISION}-dirty"
+  echo "Refusing to deploy a dirty worktree" >&2
+  exit 1
 fi
+REMOTE_DIR="$REMOTE_ROOT/$FULL_REVISION"
 IMAGE="fairing:${SOURCE_REVISION}"
 
 # Bash 3.2 expands empty arrays as unset under `set -u`. BatchMode is also the
 # correct deployment boundary, so keep the arrays non-empty on every platform.
 SSH_ARGS=( -o BatchMode=yes )
-RSYNC_SSH="ssh -o BatchMode=yes"
 if [[ -n "$SSH_KEY" ]]; then
   [[ -r "$SSH_KEY" ]] || { echo "unreadable FAIRING_DEPLOY_SSH_KEY" >&2; exit 1; }
   SSH_ARGS+=( -i "$SSH_KEY" -o IdentitiesOnly=yes )
-  printf -v SSH_KEY_QUOTED '%q' "$SSH_KEY"
-  RSYNC_SSH+=" -i $SSH_KEY_QUOTED -o IdentitiesOnly=yes"
 fi
 
-echo "==> Syncing Fairing revision $SOURCE_REVISION"
-ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "install -d -m 0755 '$REMOTE_DIR'"
-rsync -rlptDz --delete \
-  --exclude='.git/' --exclude='.env' --exclude='.venv/' \
-  --exclude='__pycache__/' --exclude='*.pyc' --exclude='.pytest_cache/' \
-  --exclude='.scoring_store.jsonl' --exclude='seen_urls.json' \
-  --exclude='scoring_store.jsonl' --exclude='title_index.jsonl' \
-  --exclude='rate_pending.json' --exclude='payload_queue.json' \
-  --exclude='feed_errors.json' --exclude='last_run_time' \
-  --exclude='config/sources.local.yaml' \
-  -e "$RSYNC_SSH" "$SCRIPT_DIR/" "$DEPLOY_HOST:$REMOTE_DIR/"
+echo "==> Preparing Fairing revision $SOURCE_REVISION"
+incoming="$(ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "install -d -m 0755 '$REMOTE_ROOT'; mktemp -d '$REMOTE_ROOT/.incoming-${SOURCE_REVISION}.XXXXXX'")"
+git -C "$SCRIPT_DIR" archive --format=tar HEAD |
+  ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "tar -xf - -C '$incoming'"
+ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "set -eu
+  if [ -d '$REMOTE_DIR' ]; then
+    diff -qr '$incoming' '$REMOTE_DIR' >/dev/null
+    find '$incoming' -depth -delete
+  else
+    mv '$incoming' '$REMOTE_DIR'
+  fi"
 
 echo "==> Building and replacing Fairing"
 ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "

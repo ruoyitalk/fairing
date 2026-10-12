@@ -151,14 +151,12 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 | `MAIL_TO` | Email only | — | Recipient email |
 | `LLM_GATEWAY_URL` | No | `http://127.0.0.1:8525` | Local LLM Gateway address for Chinese translation |
 | `LLM_GATEWAY_API_KEY` | Chinese translation | — | Dedicated `fairing` client key; never a model-provider key |
-| `OLLAMA_MODEL` | No | — | Already installed local model for optional Ollama translation |
-| `OLLAMA_BASE_URL` | No | `http://127.0.0.1:11434` | Local Ollama endpoint |
 | `DATA_DIR` | No | project root | All runtime data files |
 | `BACKUP_DIR` | No | `~/Documents/fairing/data_bak` | Backup destination |
 | `NEWS_DIR` | No | `~/Documents/fairing-news` | Root output directory; daily digests → `NEWS_DIR/YYYY-WXX/`; NotebookLM → `NEWS_DIR/notebooklm/` |
 | `SEARCH_GATEWAY_URL` / `SG_URL` | No | — | Preferred full-text fetch gateway for configured sources |
 | `SEARCH_GATEWAY_API_KEY` | No | — | API key for Search Gateway when required |
-| `TRANSLATOR` | No | `gateway` | Gateway/DeepSeek by default; `ollama` for an optional local-model pilot |
+| `TRANSLATOR` | No | `gateway` | Chinese translation through LLM Gateway |
 | `MAIL_SPLIT_N` | No | _(off)_ | Split digest email into N parts |
 | `TOP_N` | No | `20` | Articles shown in full detail in email |
 | `RUN_MD` | No | `true` | Permanent disable Obsidian: set `false` |

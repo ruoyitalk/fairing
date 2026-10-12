@@ -6,8 +6,8 @@ Pipeline contract:
   The base pipeline (MD, NotebookLM, embeddings) always stays in English.
   --chinese adds a *parallel* Chinese note; it does not alter English output.
 
-The normal route uses LLM Gateway's dedicated Fairing identity. Fairing never
-holds a model-provider key. Local Ollama remains an optional backend.
+Translation uses LLM Gateway's dedicated Fairing identity. Fairing never
+holds a model-provider key.
 """
 import json
 import logging
@@ -55,36 +55,7 @@ def _apply_fallback(articles: list[dict]) -> None:
         a.setdefault("summary_zh", a.get("excerpt", ""))
 
 
-# ── local model backend ──────────────────────────────────────────────────────
-
-_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "ollama"})
 _GATEWAY_HOSTS = frozenset({"localhost", "127.0.0.1", "llm-gateway"})
-_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
-
-
-def _ollama_endpoint() -> str:
-    base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    parsed = urlsplit(base_url)
-    if (parsed.scheme != "http" or parsed.hostname not in _LOCAL_HOSTS
-            or parsed.username or parsed.password or parsed.path not in ("", "/")
-            or parsed.query or parsed.fragment):
-        raise ValueError("OLLAMA_BASE_URL must be a local HTTP Ollama service")
-    return base_url.rstrip("/") + "/api/generate"
-
-
-def _call_ollama(prompt: str) -> str:
-    import requests
-
-    model = os.environ.get("OLLAMA_MODEL", "").strip()
-    if not _MODEL_RE.fullmatch(model):
-        raise ValueError("OLLAMA_MODEL must name an installed local model")
-    response = requests.post(
-        _ollama_endpoint(),
-        json={"model": model, "prompt": prompt, "stream": False},
-        timeout=120,
-    )
-    response.raise_for_status()
-    return str(response.json().get("response", ""))
 
 
 def _gateway_endpoint() -> str:
@@ -124,20 +95,7 @@ def _call_gateway(prompt: str) -> str:
 
 def translation_available() -> bool:
     backend = os.environ.get("TRANSLATOR", "gateway").lower()
-    if backend == "gateway":
-        return bool(os.environ.get("LLM_GATEWAY_API_KEY", "").strip())
-    if backend == "ollama":
-        return bool(os.environ.get("OLLAMA_MODEL", "").strip())
-    return False
-
-
-def _call_llm(prompt: str) -> str:
-    backend = os.environ.get("TRANSLATOR", "gateway").lower()
-    if backend == "gateway":
-        return _call_gateway(prompt)
-    if backend == "ollama":
-        return _call_ollama(prompt)
-    raise ValueError("translation supports only gateway or local Ollama")
+    return backend == "gateway" and bool(os.environ.get("LLM_GATEWAY_API_KEY", "").strip())
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -150,11 +108,9 @@ def translate(articles: list[dict], api_key: str = "",
     in rss.py. This function translates FROM English TO Chinese.
 
     Backend via environment variables:
-      TRANSLATOR      gateway (default) or ollama
+      TRANSLATOR      gateway (default)
       LLM_GATEWAY_URL local Gateway service, default http://127.0.0.1:8525
       LLM_GATEWAY_API_KEY dedicated Fairing client key
-      OLLAMA_BASE_URL local Ollama service, default http://127.0.0.1:11434
-      OLLAMA_MODEL    installed local model; if absent, keep English text
 
     Falls back to raw English excerpt on any error, never raises.
 
@@ -178,7 +134,7 @@ def translate(articles: list[dict], api_key: str = "",
         batch  = public_articles[i: i + _BATCH_SIZE]
         prompt = _PROMPT_TMPL.format(items=_build_items(batch))
         try:
-            raw    = _call_llm(prompt)
+            raw    = _call_gateway(prompt)
             parsed = _parse_response(raw)
             if (not isinstance(parsed, list) or len(parsed) != len(batch)
                     or any(not isinstance(item, dict)

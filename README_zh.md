@@ -146,14 +146,14 @@ DATA_DIR=~/OneDrive/fairing
 | `SMTP_USER` | 仅邮件模式 | — | 163 发件地址 |
 | `SMTP_PASSWORD` | 仅邮件模式 | — | 163 授权码 |
 | `MAIL_TO` | 仅邮件模式 | — | 收件地址 |
-| `OLLAMA_MODEL` | 否 | — | 已安装的本地模型，用于可选中文翻译；未配置时保留英文 |
-| `OLLAMA_BASE_URL` | 否 | `http://127.0.0.1:11434` | 本地 Ollama 地址 |
+| `LLM_GATEWAY_URL` | 否 | `http://127.0.0.1:8525` | 中文翻译使用的本地 Gateway 地址 |
+| `LLM_GATEWAY_API_KEY` | 中文翻译 | — | Fairing 专用客户端密钥，不是 DeepSeek 密钥 |
 | `DATA_DIR` | 否 | 项目根目录 | 所有运行时数据文件 |
 | `BACKUP_DIR` | 否 | `~/Documents/fairing/data_bak` | 备份目标目录 |
 | `NEWS_DIR` | 否 | `~/Documents/fairing-news` | 输出根目录；日摘 → `NEWS_DIR/YYYY-WXX/`；NotebookLM → `NEWS_DIR/notebooklm/` |
 | `SEARCH_GATEWAY_URL` / `SG_URL` | 否 | — | 已配置源的全文抓取优先网关 |
 | `SEARCH_GATEWAY_API_KEY` | 否 | — | Search Gateway 需要认证时使用 |
-| `TRANSLATOR` | 否 | `ollama` | 全免费路线仅使用本地 Ollama |
+| `TRANSLATOR` | 否 | `gateway` | 通过 LLM Gateway 翻译公开资讯 |
 | `MAIL_SPLIT_N` | 否 | （关闭） | 将摘要邮件拆分为 N 封 |
 | `TOP_N` | 否 | `20` | 邮件中全文展示的文章数 |
 | `RUN_MD` | 否 | `true` | 永久禁用 Obsidian 输出：设为 `false` |
