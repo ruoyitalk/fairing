@@ -1,7 +1,6 @@
 """ruoyi_talk · fairing — Streamlit web UI for the RSS digest + payload system."""
 import json
 import os
-import random
 import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
@@ -31,6 +30,7 @@ from fairing.export import (
     write_payload_queue,
 )
 from fairing.trainer import load_feedback
+from fairing.editorial import feedback_by_url, is_visible
 from fairing.web_actions import active_feed_errors, record_feedback
 from fairing.web_auth import (
     google_user_allowed,
@@ -163,21 +163,29 @@ def _format_time(ts_str: str) -> str:
 
 
 def _build_label_pool() -> list[dict]:
-    """Build unlabeled article pool matching \\rate logic: shuffle, cap at rate_pending.n."""
+    """Offer current digest articles first, then recent indexed articles."""
     feedback = _read_feedback()
     labeled = _labeled_urls(feedback)
-    title_idx = _read_title_index()
-    pool = [a for a in title_idx if a.get("url") not in labeled]
-    random.shuffle(pool)
     pending = _load_json(rate_pending_file(), {})
-    n = pending.get("n", 20)
-    if n and n > 0:
-        pool = pool[:n]
+    n = max(1, min(int(pending.get("n") or 20), 100))
+    pool: list[dict] = []
+    seen = set(labeled)
+    digest = _read_latest_digest()
+    digest_articles = select_digest_articles(digest[3], limit=n * 2) if digest else []
+    recent_articles = latest_articles(_read_title_index(), limit=n * 3)
+    for article in [*digest_articles, *recent_articles]:
+        url = article.get("url", "")
+        if url and url not in seen:
+            pool.append(article)
+            seen.add(url)
+        if len(pool) >= n:
+            break
     return pool
 
 
-def _article_preview(article: dict, *, date_field: str, excerpt_length: int = 0) -> None:
-    """Show one article without interpreting feed text as Markdown."""
+def _article_preview(article: dict, *, date_field: str, labels: dict[str, dict],
+                     scope: str, excerpt_length: int = 0) -> None:
+    """Show one article with direct feedback, without rendering feed Markdown."""
     with st.container(border=True):
         st.markdown(f"**{plain_markdown(article.get('title') or '无标题')}**")
         source = article.get("source") or "未知来源"
@@ -187,7 +195,38 @@ def _article_preview(article: dict, *, date_field: str, excerpt_length: int = 0)
         if excerpt_length and summary:
             excerpt = summary[:excerpt_length]
             st.markdown(plain_markdown(excerpt) + ("…" if len(summary) > excerpt_length else ""))
-        st.link_button("阅读原文", article["url"])
+        url = article["url"]
+        if is_web_url(url):
+            st.link_button("阅读原文", url)
+        previous = labels.get(url, {})
+        label = previous.get("label")
+        if label == 1:
+            st.caption("已标记：有价值")
+        elif label == -1:
+            st.caption("已标记：广告" if previous.get("reason") == "advertisement"
+                       else "已标记：无价值")
+        key = f"{scope}_{article_id_for(url)}"
+        useful, irrelevant, advertisement = st.columns(3)
+        with useful:
+            if st.button("有价值", key=f"useful_{key}", disabled=label == 1,
+                         use_container_width=True):
+                record_feedback(article, 1)
+                _read_feedback.clear()
+                st.rerun()
+        with irrelevant:
+            if st.button("无价值", key=f"irrelevant_{key}",
+                         disabled=label == -1 and previous.get("reason") != "advertisement",
+                         use_container_width=True):
+                record_feedback(article, -1)
+                _read_feedback.clear()
+                st.rerun()
+        with advertisement:
+            if st.button("广告", key=f"ad_{key}",
+                         disabled=label == -1 and previous.get("reason") == "advertisement",
+                         use_container_width=True):
+                record_feedback(article, -1, reason="advertisement")
+                _read_feedback.clear()
+                st.rerun()
 
 
 # ── sidebar ────────────────────────────────────────────────────────────────────
@@ -229,13 +268,15 @@ with st.sidebar:
 
 if page == "最新资讯":
     st.title("资讯")
+    labels = feedback_by_url(_read_feedback())
     view = st.radio("阅读范围", ["本期日摘", "文章库"], horizontal=True,
                     label_visibility="collapsed")
     if view == "本期日摘":
         digest = _read_latest_digest()
         if digest:
             digest_path, digest_day, digest_chinese, digest_articles = digest
-            featured = select_digest_articles(digest_articles)
+            visible = [a for a in digest_articles if is_visible(a, labels)]
+            featured = select_digest_articles(visible)
             st.caption(f"{digest_day} · {'中文' if digest_chinese else '英文'} · 本期 {len(featured)} 篇")
             digest_age = (datetime.now(_TZ_BJT).date() - datetime.fromisoformat(digest_day).date()).days
             if digest_age > 1:
@@ -245,11 +286,12 @@ if page == "最新资讯":
             if active_errors:
                 st.caption(f"有 {len(active_errors)} 个订阅源近期抓取失败，本期可能不完整。详情见「运行状态」。")
             for article in featured:
-                _article_preview(article, date_field="published", excerpt_length=180)
-            if len(digest_articles) > len(featured):
-                st.caption(f"完整日摘另有 {len(digest_articles) - len(featured)} 篇。")
+                _article_preview(article, date_field="published", labels=labels,
+                                 scope="digest", excerpt_length=180)
+            if not featured:
+                st.info("本期没有符合当前筛选的文章；可在文章库显示已过滤内容。")
             st.download_button(
-                "下载本期 Markdown", digest_path.read_bytes(), file_name=digest_path.name,
+                "下载原始日摘", digest_path.read_bytes(), file_name=digest_path.name,
                 mime="text/markdown",
             )
         else:
@@ -260,8 +302,12 @@ if page == "最新资讯":
         st.caption("按标题或来源查找已收录的文章。")
         query = st.text_input("搜索标题或来源")
         selected_source = st.selectbox("来源", ["全部来源", *sources])
+        show_filtered = st.checkbox("显示已过滤的内容", value=False)
+        candidates = all_articles if show_filtered else [
+            article for article in all_articles if is_visible(article, labels)
+        ]
         articles = latest_articles(
-            all_articles, query=query,
+            candidates, query=query,
             source="" if selected_source == "全部来源" else selected_source,
         )
         if not all_articles:
@@ -271,7 +317,7 @@ if page == "最新资讯":
         else:
             st.caption(f"显示 {len(articles)} 篇，最多 30 篇。")
             for article in articles:
-                _article_preview(article, date_field="date")
+                _article_preview(article, date_field="date", labels=labels, scope="library")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: DASHBOARD
@@ -297,11 +343,11 @@ elif page == "运行状态":
         if has_model:
             st.metric("个性化筛选", "已启用")
         elif len(labeled) >= 80:
-            st.metric("个性化筛选", "等待更新")
+            st.metric("个性化筛选", "待训练")
         else:
             st.metric("个性化筛选", "尚未启用")
 
-    st.caption("标记文章是可选的，不影响每日资讯更新。")
+    st.caption("广告和无价值标记会立即从阅读页隐藏；标注积累到训练门槛后可用于个性化排序。")
 
     st.divider()
 
@@ -320,9 +366,9 @@ elif page == "运行状态":
         else:
             prog = min(len(labeled) / 80, 1.0)
             if len(labeled) < 80:
-                st.info(f"目前有 {len(labeled)} 条标记；达到 80 条后可以按个人偏好排序。")
+                st.info(f"目前有 {len(labeled)} 条标记；达到 80 条后可训练个性化排序。")
             else:
-                st.info(f"已有 {len(labeled)} 条标记，下次运行后会更新筛选结果。")
+                st.info(f"已有 {len(labeled)} 条标记，达到训练门槛；可在 CLI 完成一轮标注后触发训练。")
             st.progress(prog)
 
     with col_b:
@@ -343,7 +389,8 @@ elif page == "运行状态":
     if recent:
         rows = [
             {
-                "标签": "有价值" if r.get("label") == 1 else "无价值",
+                "标签": ("有价值" if r.get("label") == 1 else
+                       "广告" if r.get("reason") == "advertisement" else "无价值"),
                 "标题": r.get("title", "")[:65],
                 "来源": r.get("source", ""),
                 "日期": r.get("date", "")[:10],
@@ -359,7 +406,7 @@ elif page == "运行状态":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "标记文章":
     st.header("标记文章")
-    st.caption("可选操作；日摘会照常更新。")
+    st.caption("优先显示本期日摘，再显示最近收录的文章。也可在阅读页直接标记。")
 
     # Init session state
     if "label_idx" not in st.session_state:

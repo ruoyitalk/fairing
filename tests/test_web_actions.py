@@ -36,6 +36,19 @@ def test_record_feedback_rejects_web_only_string_labels(monkeypatch, tmp_path):
         record_feedback({"url": "https://example.com/a"}, "+")
 
 
+def test_advertisement_mark_is_negative_and_reversible(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from fairing.trainer import load_feedback
+    from fairing.web_actions import record_feedback
+
+    article = {"url": "https://example.com/a", "title": "A", "source": "Source"}
+    record_feedback(article, -1, reason="advertisement")
+    assert load_feedback()[0]["reason"] == "advertisement"
+    record_feedback(article, 1)
+    assert load_feedback()[0]["label"] == 1
+    assert "reason" not in load_feedback()[0]
+
+
 def test_streamlit_uses_shared_feedback_and_queue_contracts():
     source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(encoding="utf-8")
     assert "record_feedback(article, label)" in source

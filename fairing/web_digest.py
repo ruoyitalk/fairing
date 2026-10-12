@@ -4,6 +4,7 @@ import re
 import html
 from pathlib import Path
 
+from .editorial import clean_translated_title
 from .web_articles import is_web_url
 
 
@@ -16,7 +17,7 @@ def plain_markdown(value: str) -> str:
     return re.sub(r"([\\`*_{}\[\]()#+\-.!|>])", r"\\\1", html.escape(str(value)))
 
 
-def parse_digest(text: str) -> list[dict[str, str]]:
+def parse_digest(text: str, *, chinese: bool = False) -> list[dict[str, str]]:
     """Extract writer-generated article blocks without rendering feed Markdown."""
     articles: list[dict[str, str]] = []
     current: dict[str, str] | None = None
@@ -30,7 +31,9 @@ def parse_digest(text: str) -> list[dict[str, str]]:
         line = raw_line.strip()
         if line.startswith("### "):
             finish()
-            current = {"title": line[4:][:180], "source": "", "category": category,
+            title = line[4:][:180]
+            current = {"title": clean_translated_title(title) if chinese else title,
+                       "source": "", "category": category,
                        "published": "", "url": "", "summary": ""}
             continue
         if line.startswith("## "):
@@ -70,7 +73,7 @@ def latest_digest(news_dir: Path) -> tuple[Path, str, bool, list[dict[str, str]]
             candidates.append((match.group(1), bool(match.group(2)), path))
     for day, chinese, path in sorted(candidates, reverse=True):
         try:
-            articles = parse_digest(path.read_text(encoding="utf-8"))
+            articles = parse_digest(path.read_text(encoding="utf-8"), chinese=chinese)
         except OSError:
             continue
         if articles:

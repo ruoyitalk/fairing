@@ -20,10 +20,12 @@ def active_feed_errors(errors: dict) -> list[tuple[str, int]]:
     return active
 
 
-def record_feedback(article: dict, label: int) -> dict:
+def record_feedback(article: dict, label: int, *, reason: str = "") -> dict:
     """Persist one web label using the same schema as the CLI trainer."""
     if label not in (1, -1):
         raise ValueError("label must be 1 or -1")
+    if reason not in ("", "advertisement") or (reason and label != -1):
+        raise ValueError("reason must be advertisement for a negative label")
     record = {
         "url": article.get("url", ""),
         "title": article.get("title", ""),
@@ -32,5 +34,7 @@ def record_feedback(article: dict, label: int) -> dict:
         "label_index": len(load_feedback()),
         "date": today_beijing(),
     }
+    if reason:
+        record["reason"] = reason
     save_feedback(record)
     return record

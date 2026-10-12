@@ -16,6 +16,8 @@ import re
 import time
 from urllib.parse import urlsplit
 
+from .editorial import clean_translated_title
+
 logger = logging.getLogger(__name__)
 
 _BATCH_SIZE    = 25
@@ -33,11 +35,12 @@ Articles:
 
 
 def _build_items(articles: list[dict]) -> str:
-    lines = []
-    for i, a in enumerate(articles, 1):
-        excerpt = (a.get("excerpt") or "")[:_EXCERPT_CHARS]
-        lines.append(f"{i}.{a['source']}|{a['category']}|{a['title']}|{excerpt}")
-    return "\n".join(lines)
+    # Structured fields keep source/category text out of the translated title.
+    # Older pipe-delimited input caused the model to echo both as a title prefix.
+    return json.dumps([
+        {"title": a["title"], "excerpt": (a.get("excerpt") or "")[:_EXCERPT_CHARS]}
+        for a in articles
+    ], ensure_ascii=False)
 
 
 def _parse_response(raw: str) -> list[dict] | None:
@@ -144,7 +147,7 @@ def translate(articles: list[dict], api_key: str = "",
                            for item in parsed)):
                 raise ValueError("LLM returned an invalid translation list")
             for a, t in zip(batch, parsed):
-                a["title_zh"]   = t.get("t", a["title"])
+                a["title_zh"]   = clean_translated_title(t.get("t", a["title"]))
                 a["summary_zh"] = t.get("s", "")
             logger.info("Translated batch %d-%d (EN→ZH)", i + 1, i + len(batch))
         except Exception as exc:

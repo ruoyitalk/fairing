@@ -6,6 +6,15 @@ from fairing.web_digest import latest_digest, parse_digest, plain_markdown
 
 
 class WebDigestTests(unittest.TestCase):
+    def test_chinese_note_hides_old_translator_metadata_prefix(self):
+        note = """# 每日资讯 — 2026-10-12
+### OpenAI新闻|AI/官方新闻|新模型发布
+| Source | OpenAI News |
+| URL | [https://example.org/a](https://example.org/a) |
+"""
+        self.assertEqual(parse_digest(note, chinese=True)[0]["title"], "新模型发布")
+        self.assertEqual(parse_digest(note)[0]["title"], "OpenAI新闻|AI/官方新闻|新模型发布")
+
     def test_feed_text_cannot_embed_an_image(self):
         self.assertEqual(plain_markdown("![pixel](https://example.org/p)"),
                          r"\!\[pixel\]\(https://example\.org/p\)")

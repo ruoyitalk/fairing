@@ -10,6 +10,23 @@ from fairing import config, translator
 
 
 class FreeTranslatorTests(unittest.TestCase):
+    def test_prompt_keeps_title_separate_from_source_and_category(self):
+        items = translator._build_items([{
+            "source": "OpenAI News", "category": "AI / Official News",
+            "title": "New model", "excerpt": "Released today.",
+        }])
+        self.assertEqual(items, '[{"title": "New model", "excerpt": "Released today."}]')
+        self.assertNotIn("OpenAI News", items)
+
+    def test_gateway_title_echo_is_cleaned(self):
+        article = {"source": "OpenAI News", "category": "AI", "title": "New model",
+                   "excerpt": "News", "information_class": "public"}
+        with patch.dict(os.environ, {"TRANSLATOR": "gateway", "LLM_GATEWAY_API_KEY": "key"}, clear=True), \
+             patch.object(translator, "_call_gateway",
+                          return_value='[{"t":"OpenAI新闻|AI/新闻|新模型","s":"发布。"}]'):
+            result = translator.translate([article])
+        self.assertEqual(result[0]["title_zh"], "新模型")
+
     def test_old_hosted_backend_name_falls_back_without_call(self):
         article = {"source": "OpenAI", "category": "AI", "title": "New model", "excerpt": "News",
                    "information_class": "public"}
