@@ -190,6 +190,8 @@ def _finalize_successful_run() -> None:
 def _clear() -> None:
     """Clear terminal screen cross-platform."""
     import os
+    if not sys.stdout.isatty() or (os.name != "nt" and not os.environ.get("TERM")):
+        return
     os.system("cls" if os.name == "nt" else "clear")
 
 
@@ -370,7 +372,7 @@ def _show_sources() -> None:
         t.add_column("7天",   justify="right", width=5, style="cyan")
         t.add_column("质量",  justify="right", width=8)
         t.add_column("上次",  justify="right", width=7)
-        t.add_column("状态",  width=5)
+        t.add_column("状态",  width=9)
         for i, s in enumerate(rss, 1):
             name    = s.get("name", "")
             cnt     = str(src_7d.get(name, 0)) if src_7d.get(name) else "[dim]0[/dim]"
