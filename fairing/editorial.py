@@ -17,6 +17,24 @@ _CATEGORY_HINT = re.compile(
     r"AI|人工智能|研究|工程|新闻|资讯|数据库|数据平台|基础设施|架构|理性|商业|管理",
     re.IGNORECASE,
 )
+_GENERALIST_AI_SOURCES = frozenset({
+    "Simon Willison", "LessWrong", "Astral Codex Ten",
+    "MIT Sloan Management Review", "One Useful Thing", "ByteByteGo",
+})
+_AI_TOPIC = re.compile(
+    r"\b(?:AI|LLM|GPT|ChatGPT|Codex|Claude|OpenAI|Anthropic|DeepMind|"
+    r"Copilot|transformer|machine learning|neural|inference|embeddings?|"
+    r"agents?|robotics?)\b|"
+    r"人工智能|大模型|语言模型|机器学习|智能体|神经网络|多模态|"
+    r"生成式|推理模型|机器人|嵌入模型",
+    re.IGNORECASE,
+)
+_VENDOR_CASE_STUDY = re.compile(
+    r"\b(?:uses?|using|leverag(?:es|ing))\b.{0,80}"
+    r"\b(?:OpenAI|ChatGPT|Codex|GPT)\b|"
+    r"(?:借助|使用|通过|如何用|用).{0,60}(?:OpenAI|ChatGPT|Codex|GPT)",
+    re.IGNORECASE,
+)
 
 
 def clean_translated_title(title: str) -> str:
@@ -35,6 +53,21 @@ def is_promotion(article: dict) -> bool:
     return bool(_PROMOTION.search(title))
 
 
+def is_default_filtered(article: dict) -> bool:
+    """Keep the AI news page focused while retaining every item in the index."""
+    if is_promotion(article):
+        return True
+    source = str(article.get("source") or "")
+    title = clean_translated_title(article.get("title_zh") or article.get("title") or "")
+    if source == "OpenAI News" and _VENDOR_CASE_STUDY.search(title):
+        return True
+    if source in _GENERALIST_AI_SOURCES:
+        summary = str(article.get("summary_zh") or article.get("summary")
+                      or article.get("excerpt") or "")
+        return not bool(_AI_TOPIC.search(f"{title} {summary}"))
+    return False
+
+
 def feedback_by_url(feedback: list[dict]) -> dict[str, dict]:
     """Keep the last recorded opinion for each URL."""
     return {str(row["url"]): row for row in feedback if row.get("url")}
@@ -47,4 +80,4 @@ def is_visible(article: dict, labels: dict[str, dict]) -> bool:
         return True
     if label == -1:
         return False
-    return not is_promotion(article)
+    return not is_default_filtered(article)

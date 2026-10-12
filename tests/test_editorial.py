@@ -1,5 +1,6 @@
 from fairing.editorial import (
-    clean_translated_title, feedback_by_url, is_promotion, is_visible,
+    clean_translated_title, feedback_by_url, is_default_filtered, is_promotion,
+    is_visible,
 )
 
 
@@ -28,6 +29,25 @@ def test_last_feedback_overrides_automatic_filter():
         {"url": article["url"], "label": -1, "reason": "advertisement"},
     ])
     assert not is_visible(article, labels)
+
+
+def test_generalist_feeds_require_ai_topic_and_vendor_case_studies_are_lower_priority():
+    assert is_default_filtered({
+        "source": "Simon Willison", "title": "Dwarf Fortress now uses version control",
+        "summary": "A game engineering update.",
+    })
+    assert not is_default_filtered({
+        "source": "Simon Willison", "title": "New Claude agent behavior",
+    })
+    assert is_default_filtered({
+        "source": "OpenAI News", "title": "Sophos uses OpenAI Daybreak to speed up investigations",
+    })
+    assert is_default_filtered({
+        "source": "OpenAI News", "title": "Sophos借助OpenAI Daybreak将调查时间缩短96%",
+    })
+    assert not is_default_filtered({
+        "source": "OpenAI News", "title": "Introducing GPT-6.1 Sol",
+    })
 
 
 def test_old_translation_prefix_is_removed_without_damaging_plain_title():

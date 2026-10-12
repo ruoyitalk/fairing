@@ -1483,7 +1483,7 @@ def _run_digest_locked(chinese: bool = False,
     from fairing.embedder import enrich, load_store, fan_out
     from fairing.scorer import score_articles
     from fairing.writer import write_digest, write_chinese, select_digest_articles
-    from fairing.editorial import is_promotion
+    from fairing.editorial import is_default_filtered
     from fairing.mailer import send_digest
     from fairing.state import filter_unseen, mark_seen
 
@@ -1510,7 +1510,7 @@ def _run_digest_locked(chinese: bool = False,
     articles = enrich(articles)
     articles = score_articles(articles)
 
-    digest_articles = select_digest_articles([a for a in articles if not is_promotion(a)])
+    digest_articles = select_digest_articles([a for a in articles if not is_default_filtered(a)])
     logger.info("Daily note selected %d/%d articles", len(digest_articles), len(articles))
     path, count = write_digest(digest_articles, cfg.news_dir)
     logger.info("Digest (EN) -> %s  [+%d]", path, count)
