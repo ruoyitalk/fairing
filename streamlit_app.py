@@ -237,6 +237,13 @@ if page == "最新资讯":
             digest_path, digest_day, digest_chinese, digest_articles = digest
             featured = select_digest_articles(digest_articles)
             st.caption(f"{digest_day} · {'中文' if digest_chinese else '英文'} · 本期 {len(featured)} 篇")
+            digest_age = (datetime.now(_TZ_BJT).date() - datetime.fromisoformat(digest_day).date()).days
+            if digest_age > 1:
+                st.warning(f"这期日摘是 {digest_age} 天前的，可能没有包含最近的新消息。")
+            errors = _load_json(feed_errors_file(), {})
+            active_errors = active_feed_errors(errors) if isinstance(errors, dict) else []
+            if active_errors:
+                st.caption(f"有 {len(active_errors)} 个订阅源近期抓取失败，本期可能不完整。详情见「运行状态」。")
             for article in featured:
                 _article_preview(article, date_field="published", excerpt_length=180)
             if len(digest_articles) > len(featured):
