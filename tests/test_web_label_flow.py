@@ -1,6 +1,7 @@
 """The reader's ad action should write feedback and update the visible list."""
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,21 +15,22 @@ def test_reader_marks_ad_then_restores_it_from_article_library(tmp_path, monkeyp
     url = "https://example.org/technical-post"
     data_dir = tmp_path / "data"
     news_dir = tmp_path / "news"
-    week = news_dir / "2026-W42"
+    today = datetime.now(timezone(timedelta(hours=8))).date()
+    week = news_dir / f"{today.isocalendar().year}-W{today.isocalendar().week:02d}"
     week.mkdir(parents=True)
-    (week / "2026-10-12-zh.md").write_text(
-        "# 每日资讯 — 2026-10-12\n\n"
-        "## Test · AI\n\n"
+    (week / f"{today}-zh.md").write_text(
+        f"# 每日资讯 — {today}\n\n"
+        "## OpenAI News · AI\n\n"
         "### 新技术文章\n\n"
-        "| Source | Test |\n"
-        "| Published | 2026-10-12 |\n"
+        "| Source | OpenAI News |\n"
+        f"| Published | {today} |\n"
         f"| URL | [{url}]({url}) |\n",
         encoding="utf-8",
     )
     data_dir.mkdir()
     (data_dir / "title_index.jsonl").write_text(json.dumps({
-        "url": url, "title": "New technical article", "source": "Test",
-        "date": "2026-10-12",
+        "url": url, "title": "New technical article", "source": "OpenAI News",
+        "date": str(today),
     }) + "\n", encoding="utf-8")
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     monkeypatch.setenv("NEWS_DIR", str(news_dir))

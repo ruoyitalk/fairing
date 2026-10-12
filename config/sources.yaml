@@ -10,6 +10,9 @@
 #   url               RSS/Atom feed URL
 #   category          used for grouping in output
 #   tags              semantic labels for fan-out routing (see subscriptions.yaml)
+#   digest_tier       0 = library only (default), 1 = specialist, 2 = regular,
+#                     3 = primary. This is independent of collection.
+#   enabled           false = pause collection; old articles remain searchable.
 #   firecrawl_fulltext  true = enrich with full article body before embedding.
 #                       Search Gateway is preferred when configured; local
 #                       HTTP is the fallback. Hosted scraping is disabled.
@@ -19,6 +22,7 @@ rss:
     url: https://openai.com/news/rss.xml
     category: AI / Official News
     tags: [ai, ai_research, ai_engineering]
+    digest_tier: 3
 
   # ── Databases & Data Platform ────────────────────────────────────────────────
   - name: ClickHouse Blog
@@ -60,21 +64,25 @@ rss:
     url: https://developer.nvidia.com/blog/feed/
     category: AI / Infrastructure
     tags: [ai, ai_infrastructure]
+    digest_tier: 2
 
   - name: Lilian Weng
     url: https://lilianweng.github.io/index.xml
     category: AI / ML Research
     tags: [ai, ai_research, ml_research]
+    digest_tier: 2
 
   - name: Eugene Yan
     url: https://eugeneyan.com/rss/
     category: AI / ML
     tags: [ai, ai_engineering, ml_research]
+    digest_tier: 2
 
   - name: Anthropic Engineering
     url: https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_engineering.xml
     category: AI / Engineering
     tags: [ai, ai_engineering]
+    digest_tier: 3
 
   - name: ByteByteGo
     url: https://blog.bytebytego.com/feed
@@ -91,6 +99,7 @@ rss:
     url: https://rss.arxiv.org/atom/cs.AI+cs.CL+cs.LG
     category: Research / AI
     tags: [ai, ai_research, ml_research]
+    enabled: false  # Broad feed dominates daily ingestion; labeled items remain visible.
 
   # ── GitHub Releases ──────────────────────────────────────────────────────────
   - name: CockroachDB Releases
@@ -135,16 +144,19 @@ rss:
     url: https://www.latent.space/feed
     category: AI / AGI
     tags: [ai, ai_research]
+    digest_tier: 2
 
   - name: SemiAnalysis
     url: https://www.semianalysis.com/feed
     category: AI / Infrastructure
     tags: [ai, ai_infrastructure]
+    enabled: false  # Feed's newest entry is from 2025; re-enable after repair.
 
   - name: Gwern
     url: https://gwern.net/rss.xml
     category: AI / Research
     tags: [ai, ai_research, rationality]
+    digest_tier: 1
 
   # Stephen Wolfram Writings currently fails TLS verification from the
   # homeserver container; keep disabled until the certificate chain is fixed.
@@ -157,32 +169,38 @@ rss:
     url: https://www.dwarkeshpatel.com/feed
     category: AI / Interviews
     tags: [ai, ai_research]
+    digest_tier: 1
 
   - name: LessWrong
     url: https://www.lesswrong.com/feed.xml
     category: AI / Rationality
     tags: [ai, rationality]
+    enabled: false  # Current feed is dominated by meetup announcements.
 
   - name: Astral Codex Ten
     url: https://astralcodexten.substack.com/feed
     category: AI / Rationality
     tags: [ai, rationality, psychology]
+    digest_tier: 1
 
   # ── AI Practice & Business ───────────────────────────────────────────────────
   - name: Simon Willison
     url: https://simonwillison.net/atom/everything/
     category: AI / Engineering
     tags: [ai, ai_engineering]
+    digest_tier: 2
 
   - name: One Useful Thing
     url: https://www.oneusefulthing.org/feed
     category: AI / Business
     tags: [ai, business]
+    digest_tier: 1
 
   - name: Import AI
     url: https://importai.substack.com/feed
     category: AI / Research
     tags: [ai, ai_research]
+    digest_tier: 2
 
   - name: MIT Sloan Management Review
     url: https://sloanreview.mit.edu/feed/
@@ -200,17 +218,20 @@ rss:
     url: https://huggingface.co/blog/feed.xml
     category: AI / Models
     tags: [ai, ai_research, ml_research]
+    digest_tier: 3
 
   - name: Google DeepMind Blog
     url: https://deepmind.google/blog/rss.xml
     category: AI / Research
     tags: [ai, ai_research]
+    digest_tier: 3
     firecrawl_fulltext: true
 
   - name: Google AI Blog
     url: https://blog.google/technology/ai/rss/
     category: AI / Industry
     tags: [ai, ai_engineering]
+    digest_tier: 2
     firecrawl_fulltext: true
 
   # ── Newsletters ───────────────────────────────────────────────────────────────

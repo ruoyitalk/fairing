@@ -4,7 +4,7 @@
 
 **ruoyi_talk** · v1.0.0 · MIT
 
-fairing is a personal RSS digest tool with an active-learning relevance classifier. It pulls articles from configured feeds, scores them against your taste, writes an Obsidian vault note and an optional NotebookLM source file, and sends an email summary. You label a small daily sample; once you accumulate enough feedback the classifier trains itself and starts ranking articles by predicted personal relevance. *Wraps the noise, delivers the signal.*
+fairing is a personal AI news reader. It collects configured feeds into a searchable article library and selects a short daily digest using source scope, recency, diversity, and feedback. A personal classifier contributes to ranking only after enough labels and validation.
 
 ---
 
@@ -13,6 +13,7 @@ fairing is a personal RSS digest tool with an active-learning relevance classifi
 | Doc | Description |
 |-----|-------------|
 | [docs/TRAINING.md](docs/TRAINING.md) | ML pipeline: embeddings, logistic regression, decay weights |
+| [docs/SOURCES_AND_RECOMMENDATION_zh.md](docs/SOURCES_AND_RECOMMENDATION_zh.md) | Source scope and daily recommendation rules (Chinese) |
 | [docs/LABELING.md](docs/LABELING.md) | Three-tier labeling system: `\rate`, `\rate --ext`, `\lb` |
 | [docs/BACKUP.md](docs/BACKUP.md) | Backup and restore reference |
 | [docs/PAYLOAD.md](docs/PAYLOAD.md) | Payload queue integration: `\ps`, `\sd`, `\pd` |

@@ -4,7 +4,7 @@
 
 **ruoyi_talk** · v1.0.0 · MIT
 
-fairing 是个人 RSS 日报工具，内置主动学习相关性分类器。每天从配置的订阅源拉取文章，按个人口味评分，写入 Obsidian vault 笔记和可选的 NotebookLM 源文件，并发送邮件摘要。每次运行后只需标注少量文章；积累足够的反馈后，分类器自动训练，此后按预测相关性排列文章。*过滤噪音，直达信号。*
+fairing 是个人 AI 资讯入口。订阅源负责采集，文章库保留已收录内容，日摘从近期文章里按来源、时间和标注选出少量值得读的文章。个人模型只有在标注量和验证结果达标后才参与排序。
 
 ---
 
@@ -13,6 +13,7 @@ fairing 是个人 RSS 日报工具，内置主动学习相关性分类器。每�
 | 文档 | 说明 |
 |------|------|
 | [docs/TRAINING.md](docs/TRAINING.md) | ML 流水线：嵌入、逻辑回归、衰减权重 |
+| [docs/SOURCES_AND_RECOMMENDATION_zh.md](docs/SOURCES_AND_RECOMMENDATION_zh.md) | 来源分级、首页推荐规则和验证口径 |
 | [docs/LABELING.md](docs/LABELING.md) | 三层打标体系：`\rate`、`\rate --ext`、`\lb` |
 | [docs/BACKUP.md](docs/BACKUP.md) | 备份与恢复参考手册 |
 | [docs/PAYLOAD.md](docs/PAYLOAD.md) | Payload 队列集成：`\ps`、`\sd`、`\pd` |

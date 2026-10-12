@@ -17,10 +17,10 @@ def plain_markdown(value: str) -> str:
     return re.sub(r"([\\`*_{}\[\]()#+\-.!|>])", r"\\\1", html.escape(str(value)))
 
 
-def parse_digest(text: str, *, chinese: bool = False) -> list[dict[str, str]]:
+def parse_digest(text: str, *, chinese: bool = False) -> list[dict]:
     """Extract writer-generated article blocks without rendering feed Markdown."""
-    articles: list[dict[str, str]] = []
-    current: dict[str, str] | None = None
+    articles: list[dict] = []
+    current: dict | None = None
     category = ""
 
     def finish() -> None:
@@ -56,13 +56,18 @@ def parse_digest(text: str, *, chinese: bool = False) -> list[dict[str, str]]:
             match = _URL_CELL.fullmatch(line)
             if match:
                 current["url"] = match.group(1)
+        elif line.startswith("| Score |"):
+            try:
+                current["score"] = float(line.removeprefix("| Score |").removesuffix("|").strip())
+            except ValueError:
+                pass
         elif line and not line.startswith(("|", "![")):
             current["summary"] = (current["summary"] + " " + line).strip()[:500]
     finish()
     return articles
 
 
-def latest_digest(news_dir: Path) -> tuple[Path, str, bool, list[dict[str, str]]] | None:
+def latest_digest(news_dir: Path) -> tuple[Path, str, bool, list[dict]] | None:
     """Find the newest readable note, preferring Chinese on the same date."""
     if not news_dir.is_dir():
         return None

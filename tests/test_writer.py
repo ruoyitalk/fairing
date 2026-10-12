@@ -1,5 +1,6 @@
 """Tests for fairing/writer.py — plain Markdown digest output."""
 from pathlib import Path
+from datetime import date
 
 
 def _article(url: str = "https://a.com/1", title: str = "Article One",
@@ -82,17 +83,76 @@ def test_write_digest_tiered_display(tmp_path):
 def test_daily_selection_limits_backlog_and_spreads_sources():
     from fairing.writer import select_digest_articles
     articles = [
-        _article(url=f"https://a.com/{i}", source="A", published=f"2026-10-{30-i:02d}")
+        _article(url=f"https://a.com/{i}", title=f"A article {i}", source="A",
+                 published=f"2026-10-{30-i:02d}")
         for i in range(12)
     ] + [
-        _article(url=f"https://b.com/{i}", source="B", published=f"2026-09-{30-i:02d}")
+        _article(url=f"https://b.com/{i}", title=f"B article {i}", source="B",
+                 published=f"2026-09-{30-i:02d}")
         for i in range(12)
     ]
     selected = select_digest_articles(articles, limit=8, per_source=3)
-    assert len(selected) == 8
+    assert len(selected) == 6
     assert {a["source"] for a in selected} == {"A", "B"}
     assert sum(a["source"] == "B" for a in selected) >= 3
     assert selected[0]["url"] == "https://a.com/0"
+
+
+def test_digest_respects_source_scope_and_recent_window():
+    from fairing.writer import select_digest_articles
+    rows = [
+        _article(url="https://a.com/new", source="Official", category="AI", published="2026-10-12"),
+        _article(url="https://b.com/old", source="Official", category="AI", published="2026-10-01"),
+        _article(url="https://c.com/new", source="Library", category="AI", published="2026-10-12"),
+    ]
+    selected = select_digest_articles(
+        rows, source_tiers={"Official": 3, "Library": 0}, as_of=date(2026, 10, 12),
+    )
+    assert [row["url"] for row in selected] == ["https://a.com/new"]
+
+
+def test_digest_feedback_overrides_filter_but_not_source_cap():
+    from fairing.writer import select_digest_articles
+    rows = [
+        _article(url="https://a.com/1", title="Developer meetup", source="A"),
+        _article(url="https://a.com/2", title="Technical paper", source="A"),
+        _article(url="https://a.com/3", title="Model release", source="A"),
+        _article(url="https://b.com/1", title="Agent tutorial", source="B"),
+    ]
+    labels = {
+        "https://a.com/1": {"label": 1, "source": "A"},
+        "https://a.com/2": {"label": -1, "source": "A"},
+    }
+    selected = select_digest_articles(
+        rows, source_tiers={"A": 2, "B": 2}, labels=labels, per_source=1,
+    )
+    assert [row["url"] for row in selected] == ["https://a.com/1", "https://b.com/1"]
+
+
+def test_digest_model_score_is_secondary_to_source_quality_and_deduplicates():
+    from fairing.writer import select_digest_articles
+    good = _article(url="https://first.example/p?utm_source=rss", title="New model",
+                    source="Official", category="AI")
+    good["score"] = 0.1
+    duplicate = _article(url="https://first.example/p", title="New model",
+                         source="Other", category="AI")
+    weak = _article(url="https://weak.example/p", title="Another model",
+                    source="Other", category="AI")
+    weak["score"] = 0.99
+    selected = select_digest_articles(
+        [weak, duplicate, good], source_tiers={"Official": 3, "Other": 1},
+    )
+    assert [row["url"] for row in selected] == [good["url"], weak["url"]]
+
+
+def test_digest_model_score_ranks_equally_fresh_articles_from_same_tier():
+    from fairing.writer import select_digest_articles
+    low = _article(url="https://a.com/low", title="Low score", source="A")
+    high = _article(url="https://b.com/high", title="High score", source="B")
+    low["score"] = 0.1
+    high["score"] = 0.9
+    selected = select_digest_articles([low, high], source_tiers={"A": 2, "B": 2})
+    assert [row["url"] for row in selected] == [high["url"], low["url"]]
 
 
 def test_daily_selection_prioritizes_ai_sources_without_dropping_other_index_entries():

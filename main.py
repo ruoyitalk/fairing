@@ -298,9 +298,9 @@ def _set_env(key: str, value: str) -> None:
 
 def _show_sources() -> None:
     from datetime import timedelta
-    from fairing.embedder import load_store
     from fairing.state import normalize_url as _norm
     from fairing.trainer import load_feedback
+    from fairing.paths import title_index_file
 
     # ── Build per-source label quality (positive ratio) ───────────────────────
     src_pos:     dict[str, int] = {}
@@ -313,57 +313,46 @@ def _show_sources() -> None:
         if f["label"] == 1:
             src_pos[src] = src_pos.get(src, 0) + 1
 
-    # ── Build per-source 7-day counts ─────────────────────────────────────────
+    # ── Build recent counts and last publication from the lightweight index ───
     src_7d: dict[str, int] = {}
-    total_7d = 0
-    if SEEN_URLS().exists():
-        cutoff    = (datetime.now(_TZ_BEIJING) - timedelta(days=7)).date().isoformat()
-        seen_data = json.loads(SEEN_URLS().read_text(encoding="utf-8"))
-        store     = load_store()
-        norm_to_src = {_norm(url): e.get("source", "") for url, e in store.items()}
-        for day, val in seen_data.items():
-            if day < cutoff:
-                continue
-            for nu in (val.get("urls", [])):
-                total_7d += 1
-                src = norm_to_src.get(nu, "")
-                if src:
-                    src_7d[src] = src_7d.get(src, 0) + 1
-
-    console.print(
-        f"  [dim]过去 7 天收录[/dim]  [bold cyan]{total_7d}[/bold cyan] 篇（不重复）\n"
-    )
-
-    # ── Build per-source last-article datetime (hours ago) ────────────────────
-    from fairing.paths import title_index_file
-    import json as _json
+    cutoff = (datetime.now(_TZ_BEIJING) - timedelta(days=6)).date().isoformat()
     now_utc = datetime.now(timezone.utc)
     src_last_h: dict[str, float] = {}
     _fmt = "%Y-%m-%d %H:%M UTC"
+    seen_recent: set[str] = set()
     if title_index_file().exists():
         src_latest: dict[str, datetime] = {}
-        for line in title_index_file().read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                e   = _json.loads(line)
-                src = e.get("source", "")
-                raw = e.get("date", "")
-                if not src or not raw or raw == "unknown":
+        with title_index_file().open(encoding="utf-8") as index:
+            for line in index:
+                if not line.strip():
                     continue
                 try:
-                    dt = datetime.strptime(raw, _fmt).replace(tzinfo=timezone.utc)
-                except ValueError:
-                    try:
-                        dt = datetime.strptime(raw[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                    except ValueError:
+                    e = json.loads(line)
+                    src = e.get("source", "")
+                    raw = e.get("date", "")
+                    if not src or not raw or raw == "unknown":
                         continue
-                if src not in src_latest or dt > src_latest[src]:
-                    src_latest[src] = dt
-            except (json.JSONDecodeError, KeyError):
-                continue
+                    url = _norm(e.get("url", ""))
+                    if raw[:10] >= cutoff and url and url not in seen_recent:
+                        src_7d[src] = src_7d.get(src, 0) + 1
+                        seen_recent.add(url)
+                    try:
+                        dt = datetime.strptime(raw, _fmt).replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        try:
+                            dt = datetime.strptime(raw[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                        except ValueError:
+                            continue
+                    if src not in src_latest or dt > src_latest[src]:
+                        src_latest[src] = dt
+                except (json.JSONDecodeError, KeyError):
+                    continue
         for src, dt in src_latest.items():
             src_last_h[src] = (now_utc - dt).total_seconds() / 3600
+
+    console.print(
+        f"  [dim]过去 7 天收录[/dim]  [bold cyan]{sum(src_7d.values())}[/bold cyan] 篇（按 URL 去重）\n"
+    )
 
     for yaml_path, label in [(PUBLIC_YAML, "public"), (LOCAL_YAML, "private")]:
         data = _load_yaml(yaml_path)
@@ -377,6 +366,7 @@ def _show_sources() -> None:
         t.add_column("#",     style="dim",  width=3)
         t.add_column("名称",  style="cyan", min_width=22)
         t.add_column("分类",  min_width=12)
+        t.add_column("日摘",  justify="right", width=4)
         t.add_column("7天",   justify="right", width=5, style="cyan")
         t.add_column("质量",  justify="right", width=8)
         t.add_column("上次",  justify="right", width=7)
@@ -385,7 +375,9 @@ def _show_sources() -> None:
             name    = s.get("name", "")
             cnt     = str(src_7d.get(name, 0)) if src_7d.get(name) else "[dim]0[/dim]"
             enabled = name not in disabled_set and s.get("enabled", True)
-            status  = "[green]开[/green]" if enabled else "[red]关[/red]"
+            status  = ("[green]开[/green]" if enabled else
+                       "[yellow]配置停用[/yellow]" if s.get("enabled") is False else
+                       "[red]关[/red]")
             total_lb = src_labeled.get(name, 0)
             pos_lb   = src_pos.get(name, 0)
             if total_lb > 0:
@@ -404,7 +396,9 @@ def _show_sources() -> None:
                     last_str = f"[yellow]{int(h // 24)}d[/yellow]"
             else:
                 last_str = "[dim]—[/dim]"
-            t.add_row(str(i), name, s.get("category", ""), cnt, qual_cell, last_str, status)
+            tier = int(s.get("digest_tier", 0))
+            t.add_row(str(i), name, s.get("category", ""), str(tier) if tier else "—",
+                      cnt, qual_cell, last_str, status)
         console.print(Panel(t, title=f"[bold]{yaml_path.name}[/bold] [{color}]({label})[/{color}]",
                             border_style=color))
 
@@ -1483,7 +1477,8 @@ def _run_digest_locked(chinese: bool = False,
     from fairing.embedder import enrich, load_store, fan_out
     from fairing.scorer import score_articles
     from fairing.writer import write_digest, write_chinese, select_digest_articles
-    from fairing.editorial import is_default_filtered
+    from fairing.editorial import feedback_by_url
+    from fairing.trainer import load_feedback
     from fairing.mailer import send_digest
     from fairing.state import filter_unseen, mark_seen
 
@@ -1510,10 +1505,18 @@ def _run_digest_locked(chinese: bool = False,
     articles = enrich(articles)
     articles = score_articles(articles)
 
-    digest_articles = select_digest_articles([a for a in articles if not is_default_filtered(a)])
+    digest_articles = select_digest_articles(
+        articles,
+        source_tiers={src.name: src.digest_tier for src in cfg.rss_sources if src.enabled},
+        labels=feedback_by_url(load_feedback()),
+        as_of=date.fromisoformat(_today_beijing()),
+    )
     logger.info("Daily note selected %d/%d articles", len(digest_articles), len(articles))
-    path, count = write_digest(digest_articles, cfg.news_dir)
-    logger.info("Digest (EN) -> %s  [+%d]", path, count)
+    if digest_articles:
+        path, count = write_digest(digest_articles, cfg.news_dir)
+        logger.info("Digest (EN) -> %s  [+%d]", path, count)
+    else:
+        logger.info("No articles met the digest policy; index and run state will still advance")
 
     # Fan-out: write articles to per-subscriber output files based on tag matching
     if cfg.subscriptions:
@@ -1526,7 +1529,7 @@ def _run_digest_locked(chinese: bool = False,
     # Keep the English data and digest canonical. A Chinese note is generated
     # separately, including when the scheduled run does not send email.
     email_articles = digest_articles
-    if chinese:
+    if chinese and digest_articles:
         from fairing.translator import translate, translation_available
         if not translation_available():
             logger.warning("--chinese: Gateway unavailable; keeping the English digest")
@@ -1536,7 +1539,9 @@ def _run_digest_locked(chinese: bool = False,
             email_articles = translate(copy.deepcopy(digest_articles))
             zh_path, zh_count = write_chinese(email_articles, cfg.news_dir)
             logger.info("Digest (ZH) -> %s  [+%d]", zh_path, zh_count)
-    if no_mail:
+    if not digest_articles:
+        logger.info("Email skipped (no selected articles)")
+    elif no_mail:
         logger.info("Email skipped (--no-mail)")
     else:
         send_digest(email_articles)
@@ -2309,6 +2314,13 @@ class Shell(cmd.Cmd):
             return
 
         name = all_rss[n - 1].get("name", "")
+        if all_rss[n - 1].get("enabled") is False:
+            console.print(Panel(
+                f"[yellow]{name} 已在来源配置中暂停[/yellow]\n"
+                "请先修改 config/sources.yaml 并部署；本地开关不能覆盖配置停用。",
+                border_style="yellow",
+            ))
+            return
 
         # Toggle in sources.local.yaml's disabled list
         local_data = _load_yaml(LOCAL_YAML)

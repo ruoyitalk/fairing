@@ -20,6 +20,9 @@ class RssSource:
     information_class: str = "public"
     tags: list[str] = field(default_factory=list)
     firecrawl_fulltext: bool = False
+    # 0 = article library only; 1 = specialist; 2 = regular; 3 = primary.
+    # A source can be collected without being eligible for the daily digest.
+    digest_tier: int = 0
     # False when the source name appears in the 'disabled' list of sources.local.yaml,
     # or when the source entry itself sets enabled: false.
     enabled: bool = True
@@ -61,6 +64,7 @@ class Config:
                 information_class=information_class,
                 tags=s.get("tags", []),
                 firecrawl_fulltext=bool(s.get("firecrawl_fulltext", False)),
+                digest_tier=max(0, min(3, int(s.get("digest_tier", 0)))),
                 enabled=s.get("enabled", True) and s["name"] not in disabled,
             )
             for s, information_class in rss_entries

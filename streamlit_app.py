@@ -30,6 +30,7 @@ from fairing.export import (
     write_payload_queue,
 )
 from fairing.trainer import load_feedback
+from fairing.config import Config
 from fairing.editorial import feedback_by_url, is_visible
 from fairing.web_actions import active_feed_errors, record_feedback
 from fairing.web_auth import (
@@ -121,6 +122,12 @@ def _read_latest_digest():
     return latest_digest(Path(os.environ.get("NEWS_DIR", "/data/news")))
 
 
+@st.cache_data(ttl=60)
+def _digest_source_tiers() -> dict[str, int]:
+    return {source.name: source.digest_tier for source in Config().rss_sources
+            if source.enabled}
+
+
 def _load_json(path: Path, default=None):
     try:
         if path.exists():
@@ -171,8 +178,16 @@ def _build_label_pool() -> list[dict]:
     pool: list[dict] = []
     seen = set(labeled)
     digest = _read_latest_digest()
-    digest_articles = select_digest_articles(digest[3], limit=n * 2) if digest else []
-    recent_articles = latest_articles(_read_title_index(), limit=n * 3)
+    labels = feedback_by_url(feedback)
+    today = datetime.now(_TZ_BJT).date()
+    tiers = _digest_source_tiers()
+    digest_articles = select_digest_articles(
+        digest[3], limit=n * 2, source_tiers=tiers, labels=labels, as_of=today,
+    ) if digest else []
+    recent_articles = select_digest_articles(
+        _read_title_index(), limit=n * 3, per_source=3,
+        source_tiers=tiers, labels=labels, as_of=today,
+    )
     for article in [*digest_articles, *recent_articles]:
         url = article.get("url", "")
         if url and url not in seen:
@@ -276,7 +291,10 @@ if page == "最新资讯":
         if digest:
             digest_path, digest_day, digest_chinese, digest_articles = digest
             visible = [a for a in digest_articles if is_visible(a, labels)]
-            featured = select_digest_articles(visible)
+            featured = select_digest_articles(
+                visible, source_tiers=_digest_source_tiers(), labels=labels,
+                as_of=datetime.now(_TZ_BJT).date(),
+            )
             st.caption(f"{digest_day} · {'中文' if digest_chinese else '英文'} · 本期 {len(featured)} 篇")
             digest_age = (datetime.now(_TZ_BJT).date() - datetime.fromisoformat(digest_day).date()).days
             if digest_age > 1:
@@ -347,7 +365,7 @@ elif page == "运行状态":
         else:
             st.metric("个性化筛选", "尚未启用")
 
-    st.caption("广告和无价值标记会立即从阅读页隐藏；标注积累到训练门槛后可用于个性化排序。")
+    st.caption("标记会立即影响单篇显示和同源排序；达到训练门槛后，模型分数才参与排序。")
 
     st.divider()
 
@@ -380,6 +398,34 @@ elif page == "运行状态":
                 st.warning(f"**{src}**: 连续失败 {consecutive} 次")
         else:
             st.info("最近未记录连续失败的订阅源。")
+
+    st.divider()
+
+    st.subheader("日摘来源")
+    cutoff = (datetime.now(_TZ_BJT).date() - timedelta(days=6)).isoformat()
+    recent_by_source: dict[str, int] = {}
+    latest_by_source: dict[str, str] = {}
+    seen_recent: set[str] = set()
+    for article in title_idx:
+        source = str(article.get("source") or "")
+        day = str(article.get("date") or "")[:10]
+        url = str(article.get("url") or "")
+        if not source or not day:
+            continue
+        latest_by_source[source] = max(day, latest_by_source.get(source, ""))
+        if day >= cutoff and url and url not in seen_recent:
+            recent_by_source[source] = recent_by_source.get(source, 0) + 1
+            seen_recent.add(url)
+    tier_name = {1: "候选", 2: "常规", 3: "核心"}
+    source_rows = [
+        {"来源": source.name, "日摘": tier_name[source.digest_tier],
+         "近 7 天收录": recent_by_source.get(source.name, 0),
+         "最近文章": latest_by_source.get(source.name, "—")}
+        for source in Config().rss_sources if source.enabled and source.digest_tier > 0
+    ]
+    source_rows.sort(key=lambda row: (-{"核心": 3, "常规": 2, "候选": 1}[row["日摘"]], row["来源"]))
+    st.dataframe(source_rows, use_container_width=True, hide_index=True)
+    st.caption("近 7 天为 0 只表示没有收录新文章；来源可在 CLI 查看抓取状态。")
 
     st.divider()
 

@@ -201,3 +201,20 @@ def test_cli_run_exits_tempfail_when_pipeline_does_not_complete(monkeypatch):
         main.main()
 
     assert exc.value.code == getattr(os, "EX_TEMPFAIL", 75)
+
+
+def test_cli_toggle_cannot_claim_config_paused_source_was_enabled(tmp_path, monkeypatch):
+    import main
+
+    public = tmp_path / "sources.yaml"
+    local = tmp_path / "sources.local.yaml"
+    public.write_text(
+        "rss:\n  - name: Paused\n    url: https://example.org/rss\n    enabled: false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "PUBLIC_YAML", public)
+    monkeypatch.setattr(main, "LOCAL_YAML", local)
+
+    main.Shell().do_toggle("1")
+
+    assert not local.exists()

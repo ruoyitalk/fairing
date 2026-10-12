@@ -45,6 +45,13 @@ def test_generalist_feeds_require_ai_topic_and_vendor_case_studies_are_lower_pri
     assert is_default_filtered({
         "source": "OpenAI News", "title": "Sophos借助OpenAI Daybreak将调查时间缩短96%",
     })
+    assert is_default_filtered({
+        "source": "OpenAI News", "title": "LegalOn将Codex成本减半同时保持开发速度",
+    })
+    assert is_default_filtered({
+        "source": "OpenAI News", "title": "Asana cuts model costs 76x with GPT-6.1 Sol",
+    })
+    assert is_default_filtered({"source": "Lilian Weng", "title": "FAQ"})
     assert not is_default_filtered({
         "source": "OpenAI News", "title": "Introducing GPT-6.1 Sol",
     })

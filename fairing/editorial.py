@@ -35,6 +35,15 @@ _VENDOR_CASE_STUDY = re.compile(
     r"(?:借助|使用|通过|如何用|用).{0,60}(?:OpenAI|ChatGPT|Codex|GPT)",
     re.IGNORECASE,
 )
+_VENDOR_OUTCOME_STUDY = re.compile(
+    r"\b(?:cuts?|reduces?|saves?|speeds?|boosts?|slashes?|accelerates?)\b"
+    r".{0,90}\b(?:with|using)\b.{0,30}\b(?:OpenAI|ChatGPT|Codex|GPT)\b|"
+    r".{0,35}(?:将|把).{0,20}(?:OpenAI|ChatGPT|Codex|GPT)"
+    r".{0,35}(?:成本|时间|耗时|效率|速度)"
+    r".{0,25}(?:减半|降低|缩短|提升|提高|减少|节省)",
+    re.IGNORECASE,
+)
+_LOW_INFORMATION_TITLE = re.compile(r"^(?:faq|about|home|index|首页|常见问题)$", re.IGNORECASE)
 
 
 def clean_translated_title(title: str) -> str:
@@ -59,7 +68,11 @@ def is_default_filtered(article: dict) -> bool:
         return True
     source = str(article.get("source") or "")
     title = clean_translated_title(article.get("title_zh") or article.get("title") or "")
-    if source == "OpenAI News" and _VENDOR_CASE_STUDY.search(title):
+    if _LOW_INFORMATION_TITLE.fullmatch(title.strip()):
+        return True
+    if source == "OpenAI News" and (
+        _VENDOR_CASE_STUDY.search(title) or _VENDOR_OUTCOME_STUDY.search(title)
+    ):
         return True
     if source in _GENERALIST_AI_SOURCES:
         summary = str(article.get("summary_zh") or article.get("summary")

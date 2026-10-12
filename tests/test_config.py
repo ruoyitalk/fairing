@@ -28,6 +28,7 @@ def test_rss_source_defaults():
     assert s.firecrawl_fulltext is False
     assert s.tags == []
     assert s.information_class == "public"
+    assert s.digest_tier == 0
 
 
 def test_rss_source_explicit_disabled():
@@ -91,6 +92,18 @@ def test_config_source_level_enabled_false(tmp_config):
     from fairing.config import Config
     cfg = Config()
     assert cfg.rss_sources[0].enabled is False
+
+
+def test_config_source_digest_tier_is_independent_of_fetch(tmp_config):
+    pub, loc = tmp_config
+    _write_yaml(pub, {"rss": [
+        {"name": "Daily", "url": "https://a.com/rss", "digest_tier": 3},
+        {"name": "Archive", "url": "https://b.com/rss", "digest_tier": 0},
+    ]})
+    from fairing.config import Config
+    daily, archive = Config().rss_sources
+    assert daily.enabled and archive.enabled
+    assert daily.digest_tier == 3 and archive.digest_tier == 0
 
 
 def test_config_loads_tags_fulltext_and_subscriptions(tmp_config, monkeypatch, tmp_path):

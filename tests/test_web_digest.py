@@ -50,6 +50,15 @@ class WebDigestTests(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertEqual((result[1], result[2]), ("2026-10-12", True))
 
+    def test_parsed_note_retains_optional_model_score(self):
+        note = """### Model update
+| Source | Official |
+| Published | 2026-10-12 |
+| URL | [https://example.org/model](https://example.org/model) |
+| Score | 0.8765 |
+"""
+        self.assertEqual(parse_digest(note)[0]["score"], 0.8765)
+
 
 if __name__ == "__main__":
     unittest.main()

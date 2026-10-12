@@ -6,6 +6,7 @@ Same-day re-runs auto-merge new articles (dedup by URL).
 import pathlib
 import re
 from datetime import date, datetime
+from typing import Mapping
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -46,8 +47,10 @@ def _article_block(a: dict, use_zh: bool = False) -> list[str]:
         f"| Category | {a['category']} |",
         f"| Published | {a['published']} |",
         f"| URL | [{a['url']}]({a['url']}) |",
-        "",
     ]
+    if isinstance(a.get("score"), (int, float)):
+        lines.append(f"| Score | {max(0.0, min(1.0, a['score'])):.4f} |")
+    lines.append("")
     if image_url:
         lines += [f"![cover]({image_url})", ""]
     if excerpt:
@@ -73,34 +76,88 @@ def top_n(total: int) -> int:
 TOP_N = _TOP_MAX
 
 
-def select_digest_articles(articles: list[dict], limit: int = 20,
-                           per_source: int = 5) -> list[dict]:
-    """Prefer AI sources and keep the note short; the index retains all items."""
-    if any("score" in article for article in articles):
-        ranked = articles
-    else:
-        ranked = sorted(articles, key=lambda item: str(item.get("published") or ""),
-                        reverse=True)
+def select_digest_articles(
+    articles: list[dict], limit: int = 20, per_source: int = 2,
+    *, source_tiers: Mapping[str, int] | None = None,
+    labels: Mapping[str, dict] | None = None,
+    as_of: date | None = None, max_age_days: int = 7,
+) -> list[dict]:
+    """Select a small, recent, source-diverse digest from the article archive.
 
-    def is_ai(article: dict) -> bool:
-        tags = article.get("tags") or []
-        return "ai" in tags or "ai" in str(article.get("category") or "").casefold()
+    Source tiers express editorial scope, while the model score and observed
+    source feedback are bounded secondary signals. A negative label or an
+    obvious promotion cannot be rescued by a high model score. A positive
+    label can restore an automatically filtered article. No quota is filled
+    with extra articles from an already saturated source.
+    """
+    from .editorial import is_default_filtered
+    from .state import normalize_title, normalize_url
 
-    ranked = [article for article in ranked if is_ai(article)] + [
-        article for article in ranked if not is_ai(article)
-    ]
-    selected: list[dict] = []
-    deferred: list[dict] = []
-    source_counts: dict[str, int] = {}
-    for article in ranked:
+    labels = labels or {}
+    source_labels: dict[str, list[int]] = {}
+    for row in labels.values():
+        source = str(row.get("source") or "")
+        if source and row.get("label") in (-1, 1):
+            source_labels.setdefault(source, []).append(row["label"])
+
+    candidates: list[tuple[float, str, dict]] = []
+    for article in articles:
+        url = str(article.get("url") or "")
         source = str(article.get("source") or "")
-        if source_counts.get(source, 0) < per_source and len(selected) < limit:
-            selected.append(article)
-            source_counts[source] = source_counts.get(source, 0) + 1
+        if not url or not source:
+            continue
+        label = labels.get(url, {}).get("label")
+        if label == -1 or (label != 1 and is_default_filtered(article)):
+            continue
+        if source_tiers is None:
+            tags = article.get("tags") or []
+            tier = 2 if ("ai" in tags or "ai" in str(article.get("category") or "").casefold()) else 1
         else:
-            deferred.append(article)
-    if len(selected) < limit:
-        selected.extend(deferred[:limit - len(selected)])
+            tier = source_tiers.get(source, 0)
+        if tier <= 0 and label != 1:
+            continue
+
+        published = str(article.get("published") or article.get("date") or "")
+        age = max_age_days - 1
+        if as_of is not None:
+            try:
+                age = (as_of - date.fromisoformat(published[:10])).days
+            except ValueError:
+                continue
+            if age < -1 or age >= max_age_days:
+                continue
+
+        opinions = source_labels.get(source, [])
+        source_signal = 2 * sum(opinions) / (len(opinions) + 8)
+        model_signal = 0.0
+        if isinstance(article.get("score"), (int, float)):
+            model_signal = 4 * (max(0.0, min(1.0, article["score"])) - 0.5)
+        rank = (4 * max(tier, 0) + max(0, max_age_days - max(age, 0))
+                + source_signal + model_signal + (20 if label == 1 else 0))
+        candidates.append((rank, published, article))
+
+    candidates.sort(key=lambda item: (item[0], item[1],
+                                      str(item[2].get("source") or ""),
+                                      str(item[2].get("url") or "")), reverse=True)
+    selected: list[dict] = []
+    source_counts: dict[str, int] = {}
+    seen_urls: set[str] = set()
+    seen_titles: set[str] = set()
+    for _, _, article in candidates:
+        source = str(article["source"])
+        url = normalize_url(article["url"])
+        title = normalize_title(str(article.get("title") or ""))
+        if url in seen_urls or (title and title in seen_titles):
+            continue
+        if source_counts.get(source, 0) >= per_source:
+            continue
+        selected.append(article)
+        source_counts[source] = source_counts.get(source, 0) + 1
+        seen_urls.add(url)
+        if title:
+            seen_titles.add(title)
+        if len(selected) >= limit:
+            break
     return selected
 
 
