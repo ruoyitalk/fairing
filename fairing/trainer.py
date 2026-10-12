@@ -126,8 +126,11 @@ def save_feedback(entry: dict) -> None:
 
 def training_due() -> bool:
     """A new feedback write needs one evaluation at the next scheduled run."""
-    feedback = _ff()
-    log = _log_file()
+    # Reading status must not create /app/data in a read-only image.
+    from .paths import data_dir
+    root = data_dir()
+    feedback = root / "data" / "feedback.jsonl"
+    log = root / "training_log.jsonl"
     return feedback.exists() and (not log.exists()
                                   or feedback.stat().st_mtime_ns > log.stat().st_mtime_ns)
 
@@ -194,9 +197,9 @@ def _train(valid: list[tuple], signature: str) -> TrainResult:
     n_pos = int((y ==  1).sum())
     n_neg = int((y == -1).sum())
     human_idx = np.array([i for i, (f, _) in enumerate(valid)
-                          if f.get("annotator") != "assistant"])
+                          if f.get("annotator") != "assistant"], dtype=int)
     assistant_idx = np.array([i for i, (f, _) in enumerate(valid)
-                              if f.get("annotator") == "assistant"])
+                              if f.get("annotator") == "assistant"], dtype=int)
     n_folds = min(5, int((y[human_idx] == 1).sum()),
                   int((y[human_idx] == -1).sum()))
     grid = {"clf__C": [0.001, 0.01, 0.1, 1.0, 10.0]}
