@@ -36,7 +36,8 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "set -eu
     find '$incoming' -depth -delete
   else
     mv '$incoming' '$REMOTE_DIR'
-  fi"
+  fi
+  chmod 0755 '$REMOTE_DIR'"
 
 echo "==> Building and replacing Fairing"
 ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
