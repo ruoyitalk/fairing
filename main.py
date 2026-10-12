@@ -1320,7 +1320,7 @@ def _show_shortcuts() -> None:
     # Output toggles (positive logic, both on by default)
     args_t.add_row("",          "",                        "")
     args_t.add_row("--no-mail", "跳过发送邮件",            _off(d["no_mail"],  "RUN_NO_MAIL"))
-    args_t.add_row("--chinese", "邮件发中文（MD 保持英文）", _off(d["chinese"], "RUN_CHINESE"))
+    args_t.add_row("--chinese", "写中文日摘；发邮件时也使用中文", _off(d["chinese"], "RUN_CHINESE"))
 
     console.print(Panel(args_t, title="[bold dim]run 参数[/bold dim]", border_style="dim"))
 
@@ -1331,7 +1331,7 @@ def _load_run_defaults() -> dict:
     """Read run parameter defaults from .env.
 
     Modifier flags (default off):
-      RUN_CHINESE — email in Chinese
+      RUN_CHINESE — write a Chinese note and use Chinese in email if sent
       RUN_NO_MAIL — skip email
 
     CLI flags always override .env defaults.
@@ -1465,7 +1465,7 @@ def _run_digest_locked(chinese: bool = False,
                        no_mail: bool = False, force: bool = False) -> bool:
     """Fetch, score, and deliver the daily digest end-to-end.
 
-    @param chinese: translate email to Chinese (MD stays English)
+    @param chinese: write a separate Chinese note and translate email if sent
     @param no_mail: skip sending the digest email
     @param force:   deprecated compatibility flag; labels never block delivery
     """
@@ -1522,21 +1522,22 @@ def _run_digest_locked(chinese: bool = False,
         for sub_name, sub_stats in fan_out_stats.items():
             logger.info("  %s: %d matched, %d written", sub_name, sub_stats["matched"], sub_stats["written"])
 
-    # Email: optionally translate to Chinese for the digest only.
-    # Translation operates on a COPY — original articles are unmodified,
-    # so training data (embeddings, seen_urls) always reflects English content.
+    # Keep the English data and digest canonical. A Chinese note is generated
+    # separately, including when the scheduled run does not send email.
+    email_articles = articles
+    if chinese:
+        from fairing.translator import translate, translation_available
+        if not translation_available():
+            logger.warning("--chinese: Gateway unavailable; keeping the English digest")
+        else:
+            import copy
+            logger.info("=== Translating public sources for the Chinese note ===")
+            email_articles = translate(copy.deepcopy(articles))
+            zh_path, zh_count = write_chinese(email_articles, cfg.news_dir)
+            logger.info("Digest (ZH) -> %s  [+%d]", zh_path, zh_count)
     if no_mail:
         logger.info("Email skipped (--no-mail)")
     else:
-        email_articles = articles
-        if chinese:
-            from fairing.translator import translate, translation_available
-            if not translation_available():
-                logger.warning("--chinese: translation backend unavailable — email sent in English")
-            else:
-                import copy
-                logger.info("=== Translating for email (EN→ZH) ===")
-                email_articles = translate(copy.deepcopy(articles))
         send_digest(email_articles)
 
     # Base n on today's cumulative article count (seen_urls already updated by mark_seen).
@@ -1598,7 +1599,7 @@ class Shell(cmd.Cmd):
 
   Flags:
     --no-mail     skip email notification
-    --chinese     email in Chinese (MD stays English)
+    --chinese     write a Chinese note and translate email if sent
     --force       deprecated no-op, retained for older callers"""
         _clear()
         args          = line.split()

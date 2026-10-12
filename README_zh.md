@@ -158,7 +158,7 @@ DATA_DIR=~/OneDrive/fairing
 | `TOP_N` | 否 | `20` | 邮件中全文展示的文章数 |
 | `RUN_MD` | 否 | `true` | 永久禁用 Obsidian 输出：设为 `false` |
 | `RUN_NOTEBOOK` | 否 | `true` | 永久禁用 NotebookLM 输出：设为 `false` |
-| `RUN_CHINESE` | 否 | `false` | 每次都发中文邮件：设为 `true` |
+| `RUN_CHINESE` | 否 | `false` | 另写中文日摘；发邮件时也使用中文 |
 | `RUN_NO_MAIL` | 否 | `false` | 永不发邮件：设为 `true` |
 
 ### sources.yaml 字段说明

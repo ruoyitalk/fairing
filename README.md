@@ -161,7 +161,7 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 | `TOP_N` | No | `20` | Articles shown in full detail in email |
 | `RUN_MD` | No | `true` | Permanent disable Obsidian: set `false` |
 | `RUN_NOTEBOOK` | No | `true` | Permanent disable NotebookLM: set `false` |
-| `RUN_CHINESE` | No | `false` | Always send Chinese email: set `true` |
+| `RUN_CHINESE` | No | `false` | Write a separate Chinese digest; email uses it when enabled |
 | `RUN_NO_MAIL` | No | `false` | Never send email: set `true` |
 
 翻译只处理 `config/sources.yaml` 中的公开来源；`sources.local.yaml` 的本地来源及无法确认来源归属的旧缓存保留英文，不会以 `public` 身份送入 Gateway。Gateway 密钥只写入运行时私有配置。

@@ -528,6 +528,7 @@ elif page == "运行控制":
     st.subheader("定时任务")
     cron_file = Path(os.environ.get("DATA_DIR", "/data/fairing")) / ".cron_time"
     if cron_file.is_file():
-        st.info(f"每日 {cron_file.read_text(encoding='utf-8').strip()} 自动生成摘要，不发送邮件。")
+        language = "英文与中文" if os.environ.get("RUN_CHINESE", "").strip().lower() in ("1", "true", "yes") else "英文"
+        st.info(f"每日 {cron_file.read_text(encoding='utf-8').strip()} 自动生成{language}摘要，不发送邮件。")
     else:
         st.info("尚未设置定时运行。")

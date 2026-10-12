@@ -79,6 +79,20 @@ def test_write_digest_tiered_display(tmp_path):
     assert "Remaining" in path.read_text(encoding="utf-8")
 
 
+def test_write_chinese_note_uses_plain_chinese_headings(tmp_path):
+    from fairing.writer import write_chinese
+    article = _article(title="Original title")
+    article["title_zh"] = "中文标题"
+    article["summary_zh"] = "事实摘要。"
+    path, count = write_chinese([article], str(tmp_path))
+    text = path.read_text(encoding="utf-8")
+    assert count == 1
+    assert path.name.endswith("-zh.md")
+    assert text.startswith("# 每日资讯")
+    assert "中文标题" in text and "事实摘要。" in text
+    assert "Daily Digest" not in text
+
+
 # ── _existing_urls ─────────────────────────────────────────────────────────────
 
 def test_existing_urls_parses_digest(tmp_path):

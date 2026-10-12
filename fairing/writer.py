@@ -87,13 +87,21 @@ def _build_digest_lines(articles: list[dict], today_str: str,
     rest     = articles[n:]  if scored else []
 
     sources  = list(dict.fromkeys(a["source"] for a in articles))
-    summary  = (f"{len(featured)} full + {len(rest)} titles"
-                if scored else f"{len(articles)} articles")
+    if use_zh:
+        summary = (f"精选 {len(featured)} 篇，另有 {len(rest)} 篇标题"
+                   if scored else f"共 {len(articles)} 篇")
+        heading = "每日资讯"
+        source_summary = f"{summary}，来自 {len(sources)} 个来源"
+    else:
+        summary = (f"{len(featured)} full + {len(rest)} titles"
+                   if scored else f"{len(articles)} articles")
+        heading = "Daily Digest"
+        source_summary = f"{summary} from {len(sources)} sources"
 
     lines: list[str] = [
-        f"# Daily Digest — {today_str}",
+        f"# {heading} — {today_str}",
         "",
-        f"> {summary} from {len(sources)} sources",
+        f"> {source_summary}",
         "",
     ]
 
@@ -107,7 +115,8 @@ def _build_digest_lines(articles: list[dict], today_str: str,
             lines += _article_block(a, use_zh=use_zh)
 
     if rest:
-        lines += ["", "---", "", f"## Remaining {len(rest)} articles", ""]
+        section = f"其他 {len(rest)} 篇" if use_zh else f"Remaining {len(rest)} articles"
+        lines += ["", "---", "", f"## {section}", ""]
         for a in rest:
             from .export import article_id_for
             aid = article_id_for(a["url"])
@@ -143,7 +152,8 @@ def _write_or_merge(out_path: pathlib.Path, articles: list[dict],
         "",
         "---",
         "",
-        f"## Merged — {now_str}  (+{len(new_articles)} articles)",
+        (f"## 补充 — {now_str}（新增 {len(new_articles)} 篇）" if use_zh
+         else f"## Merged — {now_str}  (+{len(new_articles)} articles)"),
         "",
     ]
     for source_name, items in _group_by_source(new_articles).items():
