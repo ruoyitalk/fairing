@@ -17,6 +17,7 @@ class RssSource:
     name: str
     url: str
     category: str
+    information_class: str = "public"
     tags: list[str] = field(default_factory=list)
     firecrawl_fulltext: bool = False
     # False when the source name appears in the 'disabled' list of sources.local.yaml,
@@ -50,17 +51,19 @@ class Config:
         # 'disabled' is a name list in sources.local.yaml that overrides individual
         # source entries without requiring changes to sources.yaml.
         disabled: set[str] = set(local.get("disabled", []))
-        rss_entries = public.get("rss", []) + local.get("rss", [])
+        rss_entries = ([(s, "public") for s in public.get("rss", [])]
+                       + [(s, "ruoyi-private") for s in local.get("rss", [])])
         self.rss_sources = [
             RssSource(
                 name=s["name"],
                 url=s["url"],
                 category=s.get("category", "General"),
+                information_class=information_class,
                 tags=s.get("tags", []),
                 firecrawl_fulltext=bool(s.get("firecrawl_fulltext", False)),
                 enabled=s.get("enabled", True) and s["name"] not in disabled,
             )
-            for s in rss_entries
+            for s, information_class in rss_entries
         ]
 
         # Load subscriptions (fan-out routing)

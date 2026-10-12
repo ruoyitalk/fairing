@@ -63,6 +63,7 @@ def test_fetch_rss_processes_enabled_source():
         articles = fetch_rss([enabled_src])
     assert len(articles) == 1
     assert articles[0]["title"] == "Live Article"
+    assert articles[0]["information_class"] == "public"
 
 
 def test_fetch_rss_mixed_enabled_disabled():

@@ -239,6 +239,7 @@ def enrich(articles: list[dict]) -> list[dict]:
                     "url":              a["url"],
                     "date":             a.get("published", ""),
                     "source":           a.get("source", ""),
+                    "information_class": a.get("information_class", "ruoyi-private"),
                     "category":         a.get("category", ""),
                     "tags":             a.get("tags", []),
                     "title":            a.get("title", ""),

@@ -27,6 +27,7 @@ def test_rss_source_defaults():
     assert s.enabled is True
     assert s.firecrawl_fulltext is False
     assert s.tags == []
+    assert s.information_class == "public"
 
 
 def test_rss_source_explicit_disabled():
@@ -55,6 +56,9 @@ def test_config_merges_private_sources(tmp_config):
     names = [s.name for s in cfg.rss_sources]
     assert "Pub"  in names
     assert "Priv" in names
+    by_name = {s.name: s for s in cfg.rss_sources}
+    assert by_name["Pub"].information_class == "public"
+    assert by_name["Priv"].information_class == "ruoyi-private"
 
 
 def test_config_disabled_list_marks_sources(tmp_config):

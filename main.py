@@ -546,7 +546,7 @@ def _show_model_status() -> None:
     feedback = load_feedback()
     pos      = [f for f in feedback if f["label"] ==  1]
     neg      = [f for f in feedback if f["label"] == -1]
-    translator_backend = os.environ.get("TRANSLATOR", "gemini")
+    translator_backend = os.environ.get("TRANSLATOR", "gateway")
 
     # Main status table
     t = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
@@ -1530,11 +1530,10 @@ def _run_digest_locked(chinese: bool = False,
     else:
         email_articles = articles
         if chinese:
-            if (os.environ.get("TRANSLATOR", "ollama").lower() != "ollama"
-                    or not os.environ.get("OLLAMA_MODEL", "").strip()):
-                logger.warning("--chinese: local Ollama translation unavailable — email sent in English")
+            from fairing.translator import translate, translation_available
+            if not translation_available():
+                logger.warning("--chinese: translation backend unavailable — email sent in English")
             else:
-                from fairing.translator import translate
                 import copy
                 logger.info("=== Translating for email (EN→ZH) ===")
                 email_articles = translate(copy.deepcopy(articles))
@@ -2396,6 +2395,7 @@ class Shell(cmd.Cmd):
                     "url":       url,
                     "title":     entry.get("title", ""),
                     "source":    entry.get("source", ""),
+                    "information_class": entry.get("information_class", "ruoyi-private"),
                     "published": entry.get("date", ""),
                     "excerpt":   entry.get("text_for_scoring", "")[:400],
                     "category":  src_cat.get(entry.get("source", ""), ""),
@@ -2462,6 +2462,7 @@ class Shell(cmd.Cmd):
                     "url":       url,
                     "title":     entry.get("title", ""),
                     "source":    entry.get("source", ""),
+                    "information_class": entry.get("information_class", "ruoyi-private"),
                     "published": entry.get("date", ""),
                     "excerpt":   entry.get("text_for_scoring", "")[:400],
                     "category":  src_cat.get(entry.get("source", ""), ""),
@@ -2475,14 +2476,13 @@ class Shell(cmd.Cmd):
 
         email_articles = articles
         if translate:
-            if (os.environ.get("TRANSLATOR", "ollama").lower() == "ollama"
-                    and os.environ.get("OLLAMA_MODEL", "").strip()):
-                from fairing.translator import translate as _translate
+            from fairing.translator import translate as _translate, translation_available
+            if translation_available():
                 import copy
                 console.print("  [dim]正在翻译...[/dim]")
                 email_articles = _translate(copy.deepcopy(articles))
             else:
-                console.print("  [yellow]本地 Ollama 翻译未配置，以英文发送[/yellow]")
+                console.print("  [yellow]翻译后端未配置，以英文发送[/yellow]")
 
         is_resend = not is_today
         console.print(

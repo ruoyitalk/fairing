@@ -264,6 +264,7 @@ def fetch_rss(sources: list[RssSource],
                 continue
             articles.append({
                 "source": source.name,
+                "information_class": source.information_class,
                 "category": source.category,
                 "tags": source.tags,
                 "title": title,

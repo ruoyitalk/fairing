@@ -149,20 +149,24 @@ All runtime data files — including `feedback.jsonl`, `scoring_store.jsonl`, an
 | `SMTP_USER` | Email only | — | 163 SMTP sender address |
 | `SMTP_PASSWORD` | Email only | — | 163 app password |
 | `MAIL_TO` | Email only | — | Recipient email |
-| `OLLAMA_MODEL` | No | — | Already installed local model for optional Chinese translation; otherwise keep English |
+| `LLM_GATEWAY_URL` | No | `http://127.0.0.1:8525` | Local LLM Gateway address for Chinese translation |
+| `LLM_GATEWAY_API_KEY` | Chinese translation | — | Dedicated `fairing` client key; never a model-provider key |
+| `OLLAMA_MODEL` | No | — | Already installed local model for optional Ollama translation |
 | `OLLAMA_BASE_URL` | No | `http://127.0.0.1:11434` | Local Ollama endpoint |
 | `DATA_DIR` | No | project root | All runtime data files |
 | `BACKUP_DIR` | No | `~/Documents/fairing/data_bak` | Backup destination |
 | `NEWS_DIR` | No | `~/Documents/fairing-news` | Root output directory; daily digests → `NEWS_DIR/YYYY-WXX/`; NotebookLM → `NEWS_DIR/notebooklm/` |
 | `SEARCH_GATEWAY_URL` / `SG_URL` | No | — | Preferred full-text fetch gateway for configured sources |
 | `SEARCH_GATEWAY_API_KEY` | No | — | API key for Search Gateway when required |
-| `TRANSLATOR` | No | `ollama` | Only local Ollama is supported by the free-only route |
+| `TRANSLATOR` | No | `gateway` | Gateway/DeepSeek by default; `ollama` for an optional local-model pilot |
 | `MAIL_SPLIT_N` | No | _(off)_ | Split digest email into N parts |
 | `TOP_N` | No | `20` | Articles shown in full detail in email |
 | `RUN_MD` | No | `true` | Permanent disable Obsidian: set `false` |
 | `RUN_NOTEBOOK` | No | `true` | Permanent disable NotebookLM: set `false` |
 | `RUN_CHINESE` | No | `false` | Always send Chinese email: set `true` |
 | `RUN_NO_MAIL` | No | `false` | Never send email: set `true` |
+
+翻译只处理 `config/sources.yaml` 中的公开来源；`sources.local.yaml` 的本地来源及无法确认来源归属的旧缓存保留英文，不会以 `public` 身份送入 Gateway。Gateway 密钥只写入运行时私有配置。
 
 ### sources.yaml fields
 
