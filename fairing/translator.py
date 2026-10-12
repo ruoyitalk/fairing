@@ -22,8 +22,9 @@ _BATCH_SIZE    = 25
 _EXCERPT_CHARS = 500
 
 _PROMPT_TMPL = """\
-Translate the following English article titles to Chinese and write a \
-2-sentence Chinese summary for each.
+Translate each English title into plain Chinese. Summarize the excerpt in one \
+or two short factual Chinese sentences. Keep names and numbers accurate. Do not \
+add opinions, praise, advice, or facts missing from the excerpt.
 Output ONLY a JSON array, same order as input, no extra text:
 [{{"t":"<title_zh>","s":"<summary_zh>"}},...]
 

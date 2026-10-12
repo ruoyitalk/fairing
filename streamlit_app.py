@@ -1,5 +1,6 @@
 """ruoyi_talk · fairing — Streamlit web UI for the RSS digest + payload system."""
 import json
+import os
 import random
 import subprocess
 import sys
@@ -38,12 +39,13 @@ from fairing.web_auth import (
     read_secret,
     user_email,
 )
+from fairing.web_articles import is_web_url, latest_articles
 
 _TZ_BJT = timezone(timedelta(hours=8))
 
 # ── page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="ruoyi_talk",
+    page_title="Fairing · 资讯",
     page_icon="📰",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -69,8 +71,8 @@ _google_authenticated = bool(
 )
 
 if not (_local_authenticated or _google_authenticated):
-    st.title("ruoyi_talk")
-    st.caption("Fairing · RSS 智能摘要")
+    st.title("Fairing 资讯")
+    st.caption("登录后查看订阅和摘要")
 
     if getattr(st.user, "is_logged_in", False):
         email = user_email(st.user)
@@ -174,8 +176,8 @@ def _build_label_pool() -> list[dict]:
 
 # ── sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("ruoyi_talk")
-    st.caption("fairing · RSS 智能摘要")
+    st.title("Fairing")
+    st.caption("资讯与日摘")
     st.divider()
 
     feedback_sb = _read_feedback()
@@ -205,15 +207,41 @@ with st.sidebar:
     st.divider()
     page = st.radio(
         "导航",
-        ["🏠 仪表板", "🏷️ 文章标记", "📦 载荷队列", "▶️ 运行控制"],
+        ["最新资讯", "运行状态", "文章标记", "载荷队列", "运行控制"],
         label_visibility="collapsed",
     )
+
+if page == "最新资讯":
+    st.header("最新资讯")
+    st.caption("按收录时间排列，打开原文后再决定是否标记。")
+    all_articles = _read_title_index()
+    sources = sorted({str(item.get("source")) for item in all_articles if item.get("source")})
+    search_col, source_col = st.columns([2, 1])
+    with search_col:
+        query = st.text_input("搜索标题或来源")
+    with source_col:
+        selected_source = st.selectbox("来源", ["全部来源", *sources])
+    articles = latest_articles(
+        all_articles, query=query,
+        source="" if selected_source == "全部来源" else selected_source,
+    )
+    if not all_articles:
+        st.info("还没有收录文章。运行一次摘要后再来查看。")
+    elif not articles:
+        st.info("没有找到符合条件的文章。")
+    else:
+        st.caption(f"显示最近 {len(articles)} 篇")
+        for article in articles:
+            with st.container(border=True):
+                st.subheader(article.get("title") or "无标题")
+                st.caption(f"{article.get('source') or '未知来源'} · {article.get('date') or '日期未知'}")
+                st.link_button("阅读原文", article["url"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
-if page == "🏠 仪表板":
-    st.header("🏠 仪表板")
+elif page == "运行状态":
+    st.header("运行状态")
 
     feedback = _read_feedback()
     labeled = _labeled_urls(feedback)
@@ -232,23 +260,23 @@ if page == "🏠 仪表板":
     with col2:
         rate_n = pending.get("n", 0)
         rate_done = pending.get("completed", False)
-        st.metric("今日目标", rate_n, delta="✅ 完成" if rate_done else "⏳ 待完成")
+        st.metric("今日标记目标", rate_n, delta="已完成" if rate_done else "未完成")
     with col3:
         st.metric("待标记", unlabeled_count)
     with col4:
         if has_model:
-            st.metric("模型", "✅ 已训练")
+            st.metric("模型", "已训练")
         elif len(labeled) >= 80:
-            st.metric("模型", "⏳ 训练中")
+            st.metric("模型", "等待下次运行")
         else:
-            st.metric("模型", "⏸️ 数据不足")
+            st.metric("模型", "样本不足")
 
     st.divider()
 
     # ── model detail ──────────────────────────────────────────────────────────
     col_a, col_b = st.columns(2)
     with col_a:
-        st.subheader("📊 模型信息")
+        st.subheader("筛选模型")
         if has_model:
             mtime = datetime.fromtimestamp(model_file().stat().st_mtime)
             st.info(f"最后训练：{mtime.strftime('%Y-%m-%d %H:%M')}")
@@ -266,24 +294,24 @@ if page == "🏠 仪表板":
             st.progress(prog)
 
     with col_b:
-        st.subheader("⚠️ Feed 状态")
+        st.subheader("订阅源错误")
         errors = _load_json(feed_errors_file(), {})
         active_errors = active_feed_errors(errors) if isinstance(errors, dict) else []
         if active_errors:
             for src, consecutive in active_errors[:5]:
                 st.warning(f"**{src}**: 连续失败 {consecutive} 次")
         else:
-            st.success("所有 Feed 正常")
+            st.info("最近未记录连续失败的订阅源。")
 
     st.divider()
 
     # ── recent labels (deduped) ───────────────────────────────────────────────
-    st.subheader("🕐 最近标记记录")
+    st.subheader("最近标记")
     recent = _dedup_recent(feedback, 12)
     if recent:
         rows = [
             {
-                "标签": "✅" if r.get("label") == 1 else "❌",
+                "标签": "有价值" if r.get("label") == 1 else "无价值",
                 "标题": r.get("title", "")[:65],
                 "来源": r.get("source", ""),
                 "日期": r.get("date", "")[:10],
@@ -297,8 +325,8 @@ if page == "🏠 仪表板":
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: LABEL ARTICLES  (auto-loads on visit, no mode selection)
 # ══════════════════════════════════════════════════════════════════════════════
-elif page == "🏷️ 文章标记":
-    st.header("🏷️ 文章标记")
+elif page == "文章标记":
+    st.header("文章标记")
 
     # Init session state
     if "label_idx" not in st.session_state:
@@ -320,7 +348,7 @@ elif page == "🏷️ 文章标记":
     # Refresh button (top right)
     col_hdr, col_refresh = st.columns([5, 1])
     with col_refresh:
-        if st.button("🔄 刷新"):
+        if st.button("刷新"):
             st.session_state.label_pool = _build_label_pool()
             st.session_state.label_idx = 0
             st.session_state.label_count = 0
@@ -329,12 +357,12 @@ elif page == "🏷️ 文章标记":
             st.rerun()
 
     if not pool:
-        st.success("🎉 没有待标记的文章！所有文章均已标记。")
+        st.info("当前没有待标记文章。")
     elif idx >= len(pool):
-        st.success(f"🎉 本轮标记完成！共标记 {st.session_state.label_count} 篇。")
+        st.success(f"本轮已标记 {st.session_state.label_count} 篇。")
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("▶️ 继续标记（加载新一批）", type="primary"):
+            if st.button("加载下一批", type="primary"):
                 st.session_state.label_pool = _build_label_pool()
                 st.session_state.label_idx = 0
                 st.session_state.label_count = 0
@@ -349,15 +377,14 @@ elif page == "🏷️ 文章标记":
             st.subheader(article.get("title", "(无标题)"))
             col_m1, col_m2 = st.columns(2)
             with col_m1:
-                st.caption(f"📡 {article.get('source', '未知来源')}")
+                st.caption(article.get('source', '未知来源'))
             with col_m2:
                 pub = article.get("published", article.get("date", ""))
-                st.caption(f"📅 {pub[:10] if pub else '—'}")
+                st.caption(pub[:10] if pub else '—')
 
             url = article.get("url", "")
-            if url:
-                display = url if len(url) <= 80 else url[:77] + "..."
-                st.markdown(f"🔗 [{display}]({url})")
+            if is_web_url(url):
+                st.link_button("阅读原文", url)
 
             summary = article.get("summary", "")
             if summary:
@@ -378,27 +405,27 @@ elif page == "🏷️ 文章标记":
             st.session_state.label_count += 1
 
         with col1:
-            if st.button("✅ 有价值", use_container_width=True, type="primary"):
+            if st.button("有价值", use_container_width=True, type="primary"):
                 _do_label(1)
                 st.rerun()
         with col2:
-            if st.button("❌ 无价值", use_container_width=True):
+            if st.button("无价值", use_container_width=True):
                 _do_label(-1)
                 st.rerun()
         with col3:
-            if st.button("⏭️ 跳过"):
+            if st.button("跳过"):
                 st.session_state.label_idx += 1
                 st.rerun()
         with col4:
-            if st.button("📦 入队"):
+            if st.button("加入队列"):
                 _do_label(1, enqueue=True)
                 st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: PAYLOAD QUEUE
 # ══════════════════════════════════════════════════════════════════════════════
-elif page == "📦 载荷队列":
-    st.header("📦 载荷队列")
+elif page == "载荷队列":
+    st.header("载荷队列")
 
     queue = load_payload_queue()
 
@@ -406,7 +433,7 @@ elif page == "📦 载荷队列":
     with col_m:
         st.metric("队列文章数", len(queue))
     with col_c:
-        if queue and st.button("🗑️ 清空", type="secondary"):
+        if queue and st.button("清空队列", type="secondary"):
             write_payload_queue([])
             st.rerun()
 
@@ -419,9 +446,8 @@ elif page == "📦 载荷队列":
                     st.markdown(f"**{item.get('title', '无标题')}**")
                     st.caption(f"{item.get('source','—')} · `{item.get('article_id','')}`")
                     url = item.get("url", "")
-                    if url:
-                        disp = url if len(url) <= 72 else url[:69] + "..."
-                        st.markdown(f"[{disp}]({url})")
+                    if is_web_url(url):
+                        st.link_button("阅读原文", url)
                 with col_del:
                     if st.button("✕", key=f"del_{i}"):
                         remove_from_payload_queue(item.get("article_id", ""))
@@ -430,7 +456,7 @@ elif page == "📦 载荷队列":
         st.info("队列为空。在文章标记页面点击「入队」添加文章。")
 
     st.divider()
-    st.subheader("🔍 搜索文章加入队列")
+    st.subheader("搜索文章并入队")
     search_q = st.text_input("关键词搜索标题")
     if search_q:
         kws = search_q.lower().split()
@@ -457,26 +483,27 @@ elif page == "📦 载荷队列":
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: RUN CONTROL
 # ══════════════════════════════════════════════════════════════════════════════
-elif page == "▶️ 运行控制":
-    st.header("▶️ 运行控制")
+elif page == "运行控制":
+    st.header("运行控制")
 
     col_opts, col_run = st.columns([2, 1])
     with col_opts:
         st.subheader("运行选项")
-        opt_nomail  = st.checkbox("🔕 不发邮件 (--no-mail)", value=True)
-        opt_chinese = st.checkbox("🇨🇳 中文翻译 (--chinese)")
-        opt_force   = st.checkbox("⚡ 强制执行 (--force)", value=False)
+        opt_nomail  = st.checkbox("本次不发邮件", value=True)
+        opt_chinese = st.checkbox(
+            "本次生成中文摘要",
+            value=os.environ.get("RUN_CHINESE", "").strip().lower() in ("1", "true", "yes"),
+        )
     with col_run:
         st.subheader("执行")
-        run_btn = st.button("▶️ 运行摘要", type="primary", use_container_width=True)
+        run_btn = st.button("运行摘要", type="primary", use_container_width=True)
 
     if run_btn:
         cmd = [sys.executable, str(ROOT / "main.py"), "run"]
-        if opt_nomail:  cmd.append("--no-mail")
-        if opt_chinese: cmd.append("--chinese")
-        if opt_force:   cmd.append("--force")
+        cmd.append("--no-mail" if opt_nomail else "--mail")
+        cmd.append("--chinese" if opt_chinese else "--no-chinese")
 
-        st.info(f"运行：`{' '.join(cmd)}`")
+        st.info("正在生成摘要，请等待运行结束。")
         output_box = st.empty()
         lines: list[str] = []
         try:
@@ -490,27 +517,17 @@ elif page == "▶️ 运行控制":
                 output_box.code("\n".join(lines[-40:]), language="")
             proc.wait()
             if proc.returncode == 0:
-                st.success("✅ 运行完成")
+                st.success("运行完成")
                 _read_feedback.clear()
             else:
-                st.error(f"❌ 运行失败（退出码 {proc.returncode}）")
+                st.error(f"运行失败（退出码 {proc.returncode}）")
         except Exception as e:
             st.error(f"启动失败：{e}")
 
     st.divider()
-    st.subheader("📋 当前配置")
-    env_file = ROOT / ".env"
-    if env_file.exists():
-        lines_cfg = []
-        for line in env_file.read_text().splitlines():
-            if "=" in line and not line.startswith("#"):
-                key = line.split("=")[0]
-                if any(k in key.upper() for k in ["PASSWORD","KEY","TOKEN","SECRET","SMTP_PASS"]):
-                    lines_cfg.append(f"{key}=***")
-                else:
-                    lines_cfg.append(line)
-        st.code("\n".join(lines_cfg))
-
-    st.divider()
-    st.subheader("⏰ 定时任务")
-    st.info("每天 10:00 自动运行（默认不发邮件，并遵守标记门槛）")
+    st.subheader("定时任务")
+    cron_file = Path(os.environ.get("DATA_DIR", "/data/fairing")) / ".cron_time"
+    if cron_file.is_file():
+        st.info(f"每日 {cron_file.read_text(encoding='utf-8').strip()} 自动生成摘要，不发送邮件。")
+    else:
+        st.info("尚未设置定时运行。")
