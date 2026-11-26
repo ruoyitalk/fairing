@@ -69,7 +69,7 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
     chmod 0644 \"\$run_lock\"
   fi
   python3 '$REMOTE_DIR/fairing/backup_ownership.py' \
-    --root /data/data_bak --uid 1000 --gid 1000
+    --root /data/fairing-backups --uid 1000 --gid 1000
   run_fairing() {
     local image=\"\$1\"
     docker run -d \\
@@ -104,12 +104,13 @@ ssh "${SSH_ARGS[@]}" "$DEPLOY_HOST" "
       -e PAYLOAD_ROOT=/payload \\
       -e NEWS_DIR=/data/news \\
       -e KNOWLEDGE_DIR=/data/ruoyi_download \\
+      -e BACKUP_DIR=/data/fairing-backups \\
       -e PAYLOAD_DATA_DIR=/data/payload \\
       -v /data/fairing:/data/fairing \\
       -v /data/news:/data/news \\
       -v /data/ruoyi_download:/data/ruoyi_download \\
-      -v /data/data_bak:/data/data_bak \\
-      -v /data/data_bak/payload:/data/payload \\
+      --mount type=bind,source=/data/fairing-backups,target=/data/fairing-backups \\
+      --mount type=bind,source=/data/payload,target=/data/payload \\
       -v /opt/docker/homeserver-context/secrets:/run/homeserver-secrets:ro \\
       -v /opt/docker/payload_git:/payload:ro \\
       -v /opt/docker/fairing/config:/app/config:ro \\

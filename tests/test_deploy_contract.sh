@@ -38,6 +38,20 @@ for contract in \
   fi
 done
 
+for contract in \
+  '-e BACKUP_DIR=/data/fairing-backups' \
+  '--mount type=bind,source=/data/fairing-backups,target=/data/fairing-backups' \
+  '--mount type=bind,source=/data/payload,target=/data/payload'; do
+  if ! grep -Fq -- "$contract" "$DEPLOY_SCRIPT"; then
+    printf 'Fairing deploy script is missing storage contract: %s\n' "$contract" >&2
+    exit 1
+  fi
+done
+if grep -Fq '/data/data_bak' "$DEPLOY_SCRIPT"; then
+  printf 'Fairing deploy script exposes the shared backup workspace\n' >&2
+  exit 1
+fi
+
 if ! grep -Fq 'USER 1000:1000' "$SCRIPT_DIR/../Dockerfile"; then
   printf 'Fairing image must declare the non-root runtime user\n' >&2
   exit 1
@@ -69,7 +83,7 @@ for contract in \
   'chown 1000:1000 \"\$run_lock\"' \
   'chmod 0644 \"\$run_lock\"' \
   "python3 '\$REMOTE_DIR/fairing/backup_ownership.py'" \
-  '--root /data/data_bak --uid 1000 --gid 1000'; do
+  '--root /data/fairing-backups --uid 1000 --gid 1000'; do
   if ! grep -Fq -- "$contract" "$DEPLOY_SCRIPT"; then
     printf 'Fairing deploy is missing run-lock ownership repair: %s\n' "$contract" >&2
     exit 1
